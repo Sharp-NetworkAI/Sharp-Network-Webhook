@@ -8,7 +8,7 @@ const PORT = process.env.PORT || 3000;
 const VERIFY_TOKEN = "sharpnetworkbot";
 
 // Replace this later with your Make webhook URL
-const MAKE_WEBHOOK_URL = https://hook.us2.make.com/xwmsmmnkug5p7dwbgprsdcyht7o3szaf;
+const MAKE_WEBHOOK_URL = "https://hook.us2.make.com/xwmsmmnkug5p7dwbgprsdcyht7o3szaf";
 
 app.get("/", (_req, res) => {
   res.send("Sharp Network webhook is running");
