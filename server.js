@@ -39,7 +39,7 @@ app.post("/webhook", async (req, res) => {
             const attachment = event.message.attachments[0];
 
             if (attachment.type === "image" && attachment.payload?.url) {
-              if (MAKE_WEBHOOK_URL && MAKE_WEBHOOK_URL !== "PASTE_YOUR_MAKE_WEBHOOK_URL_HERE") {
+              if (MAKE_WEBHOOK_URL && MAKE_WEBHOOK_URL !== "https://hook.us2.make.com/1203tu1fsdw8mieaalgxrqm9okou7en6") {
                 await axios.post(
                   MAKE_WEBHOOK_URL,
                   {
@@ -56,7 +56,7 @@ app.post("/webhook", async (req, res) => {
           }
 
           if (event.message?.text) {
-            if (MAKE_WEBHOOK_URL && MAKE_WEBHOOK_URL !== "PASTE_YOUR_MAKE_WEBHOOK_URL_HERE") {
+            if (MAKE_WEBHOOK_URL && MAKE_WEBHOOK_URL !== "https://hook.us2.make.com/1203tu1fsdw8mieaalgxrqm9okou7en6") {
               await axios.post(
                 MAKE_WEBHOOK_URL,
                 {
