@@ -6,55 +6,81 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 const VERIFY_TOKEN = "sharpnetworkbot";
-
-// Replace this later with your Make webhook URL
 const MAKE_WEBHOOK_URL = "https://hook.us2.make.com/1203tu1fsdw8mieaalgxrqm9okou7en6";
 
 app.get("/", (_req, res) => {
-  res.send("Sharp Network webhook is running");
+  res.send("Sharp Network webhook is running.");
 });
 
-// Facebook verification endpoint
 app.get("/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
 
   if (mode === "subscribe" && token === VERIFY_TOKEN) {
-    console.log("Webhook verified");
-    res.status(200).send(challenge);
-  } else {
-    res.sendStatus(403);
+    return res.status(200).send(challenge);
   }
+
+  return res.sendStatus(403);
 });
 
-// Receive messages from Facebook
 app.post("/webhook", async (req, res) => {
   try {
-    const entry = req.body.entry;
+    const body = req.body;
 
-    if (entry && entry.length > 0) {
-      const event = entry[0].messaging[0];
-      const senderId = event.sender.id;
-      const messageText = event.message?.text;
+    if (body.object === "page") {
+      for (const entry of body.entry || []) {
+        for (const event of entry.messaging || []) {
+          const sender = event.sender?.id;
 
-      console.log("Message received:", messageText);
+          if (!sender) continue;
 
-      if (messageText) {
-        await axios.post(MAKE_WEBHOOK_URL, {
-          sender: senderId,
-          message: messageText
-        });
+          if (event.message?.attachments?.length) {
+            const attachment = event.message.attachments[0];
+
+            if (attachment.type === "image" && attachment.payload?.url) {
+              if (MAKE_WEBHOOK_URL && MAKE_WEBHOOK_URL !== "PASTE_YOUR_MAKE_WEBHOOK_URL_HERE") {
+                await axios.post(
+                  MAKE_WEBHOOK_URL,
+                  {
+                    sender,
+                    image_url: attachment.payload.url,
+                    raw_event: event
+                  },
+                  { headers: { "Content-Type": "application/json" } }
+                );
+              }
+
+              return res.sendStatus(200);
+            }
+          }
+
+          if (event.message?.text) {
+            if (MAKE_WEBHOOK_URL && MAKE_WEBHOOK_URL !== "PASTE_YOUR_MAKE_WEBHOOK_URL_HERE") {
+              await axios.post(
+                MAKE_WEBHOOK_URL,
+                {
+                  sender,
+                  message: event.message.text,
+                  raw_event: event
+                },
+                { headers: { "Content-Type": "application/json" } }
+              );
+            }
+
+            return res.sendStatus(200);
+          }
+        }
       }
     }
 
-    res.sendStatus(200);
+    return res.sendStatus(200);
   } catch (error) {
-    console.error("Webhook error:", error);
-    res.sendStatus(500);
+    console.error("Forwarding error:", error.response?.data || error.message);
+    return res.sendStatus(500);
   }
 });
 
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`Server listening on port ${PORT}`);
 });
