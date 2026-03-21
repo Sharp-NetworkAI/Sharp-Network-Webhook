@@ -6,7 +6,7 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 const VERIFY_TOKEN = "sharpnetworkbot";
-const MAKE_WEBHOOK_URL = "https://hook.us2.make.com/1203tu1fsdw8mieaalgxrqm9okou7en6";
+const MAKE_WEBHOOK_URL = "https://hook.us2.make.com/wugqo1mjfruxsgqnt5itc8ov5n1m6rav";
 
 app.get("/", (_req, res) => {
   res.send("Sharp Network webhook is running.");
@@ -59,8 +59,9 @@ app.post("/webhook", async (req, res) => {
               await axios.post(
                 MAKE_WEBHOOK_URL,
                 {
-                  sender,
+                  sender: sender,
                   message: event.message.text,
+                  image_url: null,
                   raw_event: event
                 },
                 { headers: { "Content-Type": "application/json" } }
