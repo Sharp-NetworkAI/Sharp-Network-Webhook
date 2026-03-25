@@ -34,20 +34,11 @@ app.post("/webhook", async (req, res) => {
 
     for (const entry of body.entry || []) {
       for (const event of entry.messaging || []) {
-        // Ignore delivery/read/postback/etc.
-        if (!event.message) {
-          continue;
-        }
-
-        // Ignore the bot's own echoed messages to stop loops
-        if (event.message.is_echo) {
-          continue;
-        }
+        if (!event.message) continue;
+        if (event.message.is_echo) continue;
 
         const senderId = event.sender?.id;
-        if (!senderId) {
-          continue;
-        }
+        if (!senderId) continue;
 
         const text = event.message.text || null;
 
@@ -78,7 +69,8 @@ app.post("/webhook", async (req, res) => {
                   content: [
                     {
                       type: "input_text",
-                      text: "Read this betting slip image and extract all bet legs. Return short plain text."
+                      text:
+                        "Read this betting slip image and extract the slip into valid JSON only. Return this exact shape: {\"bet_type\":\"\",\"source_sportsbook\":\"\",\"odds\":\"\",\"stake\":\"\",\"payout\":\"\",\"legs\":[{\"event\":\"\",\"market\":\"\",\"selection\":\"\"}]}. Do not use markdown. Do not add explanation. If a field is missing, use an empty string."
                     },
                     {
                       type: "input_image",
@@ -96,18 +88,17 @@ app.post("/webhook", async (req, res) => {
             console.error("OpenAI error:", openaiData);
             replyText = "I couldn't read that slip image.";
           } else {
-            replyText =
+            const rawText =
               openaiData.output?.[0]?.content?.[0]?.text ||
               "I couldn't extract the slip.";
+
+            replyText = rawText;
           }
         } else if (text) {
           replyText = "Send me a betting slip image.";
         }
 
-        // Only send if we actually created a reply
-        if (!replyText) {
-          continue;
-        }
+        if (!replyText) continue;
 
         const fbResp = await fetch(
           `https://graph.facebook.com/v18.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`,
