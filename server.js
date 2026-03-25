@@ -1,12 +1,12 @@
 const express = require("express");
-const axios = require("axios");
 
 const app = express();
 app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
-const VERIFY_TOKEN = "sharpnetworkbot";
-const MAKE_WEBHOOK_URL = "https://hook.us2.make.com/wugqo1mjfruxsgqnt5itc8ov5n1m6rav";
+const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "sharpnetworkbot";
+const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
 app.get("/", (_req, res) => {
   res.send("Sharp Network webhook is running.");
@@ -28,55 +28,90 @@ app.post("/webhook", async (req, res) => {
   try {
     const body = req.body;
 
-    if (body.object === "page") {
-      for (const entry of body.entry || []) {
-        for (const event of entry.messaging || []) {
-          const sender = event.sender?.id;
-          if (!sender) continue;
+    if (body.object !== "page") {
+      return res.sendStatus(404);
+    }
 
-          if (event.message?.attachments?.length) {
-            const attachment = event.message.attachments[0];
+    for (const entry of body.entry || []) {
+      for (const event of entry.messaging || []) {
+        const senderId = event.sender?.id;
+        const text = event.message?.text || null;
+        const attachments = event.message?.attachments || [];
+        const imageUrl =
+          attachments.find((a) => a.type === "image")?.payload?.url || null;
 
-            if (attachment.type === "image" && attachment.payload?.url) {
-              if (MAKE_WEBHOOK_URL) {
-                await axios.post(
-                  MAKE_WEBHOOK_URL,
-                  {
-                    sender,
-                    image_url: attachment.payload.url,
-                    raw_event: event
-                  },
-                  { headers: { "Content-Type": "application/json" } }
-                );
-              }
+        if (!senderId) {
+          continue;
+        }
 
-              return res.sendStatus(200);
-            }
-          }
+        let replyText = "Send me a betting slip image.";
 
-          if (event.message?.text) {
-            if (MAKE_WEBHOOK_URL) {
-              await axios.post(
-                MAKE_WEBHOOK_URL,
+        if (imageUrl) {
+          const openaiResp = await fetch("https://api.openai.com/v1/responses", {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${OPENAI_API_KEY}`,
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+              model: "gpt-4.1-mini",
+              input: [
                 {
-                  sender: sender,
-                  message: event.message.text,
-                  image_url: null,
-                  raw_event: event
-                },
-                { headers: { "Content-Type": "application/json" } }
-              );
-            }
+                  role: "user",
+                  content: [
+                    {
+                      type: "input_text",
+                      text:
+                        "Read this betting slip image and extract all bet legs. Return short plain text only."
+                    },
+                    {
+                      type: "input_image",
+                      image_url: imageUrl
+                    }
+                  ]
+                }
+              ]
+            })
+          });
 
-            return res.sendStatus(200);
+          const openaiData = await openaiResp.json();
+
+          if (!openaiResp.ok) {
+            console.error("OpenAI error:", openaiData);
+            replyText = "I couldn't read that slip image.";
+          } else {
+            replyText =
+              openaiData.output?.[0]?.content?.[0]?.text ||
+              "I couldn't extract the slip.";
           }
+        } else if (text) {
+          replyText = "Send me a betting slip image.";
+        }
+
+        const fbResp = await fetch(
+          `https://graph.facebook.com/v18.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+              recipient: { id: senderId },
+              message: { text: replyText }
+            })
+          }
+        );
+
+        const fbData = await fbResp.json();
+        if (!fbResp.ok) {
+          console.error("Facebook send error:", fbData);
         }
       }
     }
 
     return res.sendStatus(200);
   } catch (error) {
-    console.error("Forwarding error:", error.response?.data || error.message);
+    console.error("Webhook error:", error);
     return res.sendStatus(500);
   }
 });
