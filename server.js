@@ -40,31 +40,19 @@ function clean(v) {
   return String(v || "").replace(/\s+/g, " ").trim();
 }
 
-function convertToSearchText(leg) {
+function toSearchText(leg) {
   const selection = clean(leg.selection);
   const market = clean(leg.market).toLowerCase();
 
-  if (market.includes("home run")) {
-    return `${selection} home run`;
-  }
-
-  if (market.includes("total bases")) {
-    return `${selection} total bases`;
-  }
-
-  if (market.includes("points")) {
-    return `${selection} points`;
-  }
-
-  if (market.includes("rebounds")) {
-    return `${selection} rebounds`;
-  }
-
-  if (market.includes("assists")) {
-    return `${selection} assists`;
-  }
+  if (market.includes("home run")) return `${selection} home run`;
+  if (market.includes("total bases")) return `${selection} total bases`;
 
   return `${selection} ${market}`;
+}
+
+function buildGoogleLink(query, book) {
+  const q = encodeURIComponent(`${query} ${book}`);
+  return `https://www.google.com/search?q=${q}`;
 }
 
 function buildSlipSummary(slip) {
@@ -88,17 +76,20 @@ function buildRebuildMessage(book, slip) {
   const legs = slip.legs || [];
 
   const lines = legs.map((leg) => {
-    return `• ${convertToSearchText(leg)}`;
+    const query = toSearchText(leg);
+    const link = buildGoogleLink(query, book);
+
+    return `• ${query}\n🔗 ${link}`;
   });
 
   return [
     `🎯 ${book} Ready`,
     "",
-    "Copy & search each line:",
+    "Tap a link or copy a line:",
     "",
     ...lines,
     "",
-    "Paste directly into sportsbook search 🔍"
+    "This opens the exact search in your sportsbook."
   ].join("\n");
 }
 
