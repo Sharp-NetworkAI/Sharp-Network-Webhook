@@ -41,6 +41,36 @@ function getMockBetMGMMkts() {
   ];
 }
 
+function getMockBetMGMOptions() {
+  return [
+    {
+      fixtureId: "MGM_REAL_FIXTURE_001",
+      marketId: "MGM_MARKET_HR",
+      options: [
+        {
+          optionId: "MGM_OPTION_HELIOT_RAMOS_HR",
+          participant: "Heliot Ramos"
+        },
+        {
+          optionId: "MGM_OPTION_AUSTIN_WELLS_HR",
+          participant: "Austin Wells"
+        }
+      ]
+    },
+    {
+      fixtureId: "MGM_REAL_FIXTURE_001",
+      marketId: "MGM_MARKET_TOTAL_BASES",
+      options: [
+        {
+          optionId: "MGM_OPTION_LUIS_ARRAEZ_TOTAL_BASES_2_PLUS",
+          participant: "Luis Arraez",
+          line: "2+"
+        }
+      ]
+    }
+  ];
+}
+
 /* =========================
    HELPERS
 ========================= */
@@ -97,10 +127,7 @@ async function searchBetMGMFixtures(leg) {
   const text = leg.event.toLowerCase();
 
   for (const e of events) {
-    if (
-      text.includes("yankees") &&
-      text.includes("giants")
-    ) {
+    if (text.includes("yankees") && text.includes("giants")) {
       return {
         resolved: true,
         fixtureId: e.fixtureId
@@ -113,19 +140,43 @@ async function searchBetMGMFixtures(leg) {
 
 async function searchBetMGMMarkets(fixtureId, leg) {
   const data = getMockBetMGMMkts();
-  const match = data.find(d => d.fixtureId === fixtureId);
+  const match = data.find((d) => d.fixtureId === fixtureId);
 
   if (!match) return { resolved: false };
 
-  const market = match.markets.find(
-    m => m.type === leg.marketType
-  );
+  const market = match.markets.find((m) => m.type === leg.marketType);
 
   if (!market) return { resolved: false };
 
   return {
     resolved: true,
     marketId: market.marketId
+  };
+}
+
+async function searchBetMGMOptions(fixtureId, marketId, leg) {
+  const data = getMockBetMGMOptions();
+  const match = data.find(
+    (d) => d.fixtureId === fixtureId && d.marketId === marketId
+  );
+
+  if (!match) return { resolved: false };
+
+  const option = match.options.find((o) => {
+    const sameParticipant =
+      o.participant.toLowerCase() === leg.participant.toLowerCase();
+
+    const sameLine =
+      !o.line || !leg.line || o.line === leg.line;
+
+    return sameParticipant && sameLine;
+  });
+
+  if (!option) return { resolved: false };
+
+  return {
+    resolved: true,
+    optionId: option.optionId
   };
 }
 
@@ -136,21 +187,33 @@ async function resolveLeg(leg) {
     return {
       ...leg,
       fixtureId: "NOT_FOUND",
-      marketId: "NOT_FOUND"
+      marketId: "NOT_FOUND",
+      optionId: "NOT_FOUND"
     };
   }
 
-  const market = await searchBetMGMMarkets(
+  const market = await searchBetMGMMarkets(fixture.fixtureId, leg);
+
+  if (!market.resolved) {
+    return {
+      ...leg,
+      fixtureId: fixture.fixtureId,
+      marketId: "NOT_FOUND",
+      optionId: "NOT_FOUND"
+    };
+  }
+
+  const option = await searchBetMGMOptions(
     fixture.fixtureId,
+    market.marketId,
     leg
   );
 
   return {
     ...leg,
     fixtureId: fixture.fixtureId,
-    marketId: market.resolved
-      ? market.marketId
-      : "NOT_FOUND"
+    marketId: market.marketId,
+    optionId: option.resolved ? option.optionId : "NOT_FOUND"
   };
 }
 
@@ -162,7 +225,8 @@ function buildDebug(resolved) {
     .map((l, i) => {
       return `${i + 1}. ${l.participant}
 fixtureId: ${l.fixtureId}
-marketId: ${l.marketId}`;
+marketId: ${l.marketId}
+optionId: ${l.optionId}`;
     })
     .join("\n\n");
 }
@@ -187,12 +251,10 @@ async function sendMessage(id, text) {
 /* =========================
    ROUTES
 ========================= */
-app.get("/", (req, res) => res.send("running"));
+app.get("/", (_req, res) => res.send("running"));
 
 app.get("/webhook", (req, res) => {
-  if (
-    req.query["hub.verify_token"] === VERIFY_TOKEN
-  ) {
+  if (req.query["hub.verify_token"] === VERIFY_TOKEN) {
     return res.send(req.query["hub.challenge"]);
   }
   res.sendStatus(403);
@@ -201,8 +263,7 @@ app.get("/webhook", (req, res) => {
 app.post("/webhook", async (req, res) => {
   for (const entry of req.body.entry || []) {
     for (const event of entry.messaging || []) {
-
-      if (!event.message) continue;
+      if (!event.message || event.message.is_echo) continue;
 
       const sender = event.sender.id;
       const text = event.message.text;
@@ -210,54 +271,52 @@ app.post("/webhook", async (req, res) => {
       let imageUrl = null;
 
       if (event.message.attachments) {
-        const img = event.message.attachments.find(
-          a => a.type === "image"
-        );
+        const img = event.message.attachments.find((a) => a.type === "image");
         if (img) imageUrl = img.payload.url;
       }
 
       /* IMAGE */
       if (imageUrl) {
-        const ai = await fetch(
-          "https://api.openai.com/v1/responses",
-          {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${OPENAI_API_KEY}`,
-              "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-              model: "gpt-4.1-mini",
-              input: [
-                {
-                  role: "user",
-                  content: [
-                    {
-                      type: "input_text",
-                      text:
-                        'Return ONLY valid JSON. No explanation. No markdown. Format EXACTLY like this: {"bet_type":"","source_sportsbook":"","odds":"","stake":"","payout":"","legs":[{"event":"","market":"","selection":""}]}'
-                    },
-                    {
-                      type: "input_image",
-                      image_url: imageUrl
-                    }
-                  ]
-                }
-              ]
-            })
-          }
-        );
+        const ai = await fetch("https://api.openai.com/v1/responses", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${OPENAI_API_KEY}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            model: "gpt-4.1-mini",
+            input: [
+              {
+                role: "user",
+                content: [
+                  {
+                    type: "input_text",
+                    text:
+                      'Return ONLY valid JSON. No explanation. No markdown. Format EXACTLY like this: {"bet_type":"","source_sportsbook":"","odds":"","stake":"","payout":"","legs":[{"event":"","market":"","selection":""}]}'
+                  },
+                  {
+                    type: "input_image",
+                    image_url: imageUrl
+                  }
+                ]
+              }
+            ]
+          })
+        });
 
         const data = await ai.json();
         const raw = data.output?.[0]?.content?.[0]?.text || "";
         const parsed = safeParseJSON(raw);
 
-        if (!parsed) {
+        if (!parsed || !parsed.legs) {
           await sendMessage(sender, "parse failed");
           continue;
         }
 
-        userSlipStore[sender] = parsed.legs.map(normalizeLeg);
+        userSlipStore[sender] = {
+          legs: parsed.legs.map(normalizeLeg),
+          resolved: null
+        };
 
         await sendMessage(sender, "Slip copied ✅\n\nReply: BetMGM");
         continue;
@@ -265,20 +324,20 @@ app.post("/webhook", async (req, res) => {
 
       /* BETMGM */
       if (text?.toLowerCase() === "betmgm") {
-        const legs = userSlipStore[sender];
+        const saved = userSlipStore[sender];
 
-        if (!legs) {
+        if (!saved?.legs) {
           await sendMessage(sender, "Send slip first");
           continue;
         }
 
         const resolved = [];
 
-        for (const leg of legs) {
+        for (const leg of saved.legs) {
           resolved.push(await resolveLeg(leg));
         }
 
-        userSlipStore[sender] = { resolved };
+        userSlipStore[sender].resolved = resolved;
 
         await sendMessage(sender, "Resolved");
         continue;
@@ -286,14 +345,14 @@ app.post("/webhook", async (req, res) => {
 
       /* DEBUG */
       if (text?.toLowerCase() === "payload debug") {
-        const data = userSlipStore[sender]?.resolved;
+        const saved = userSlipStore[sender];
 
-        if (!data) {
+        if (!saved?.resolved) {
           await sendMessage(sender, "Run BetMGM first");
           continue;
         }
 
-        await sendMessage(sender, buildDebug(data));
+        await sendMessage(sender, buildDebug(saved.resolved));
         continue;
       }
 
