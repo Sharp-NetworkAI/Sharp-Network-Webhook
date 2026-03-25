@@ -165,24 +165,6 @@ function buildSlipSummary(normalizedSlip) {
   ].join("\n");
 }
 
-function buildRebuildMessage(book, normalizedSlip) {
-  const legs = normalizedSlip.legs || [];
-
-  const lines = legs.map((leg) => {
-    return `• ${leg.participant} — ${leg.rawMarket}`;
-  });
-
-  return [
-    `🎯 ${book} Ready`,
-    "",
-    "Rebuild list:",
-    "",
-    ...lines,
-    "",
-    "Send another slip anytime."
-  ].join("\n");
-}
-
 function buildNormalizedDebugMessage(normalizedSlip) {
   const legs = normalizedSlip.legs || [];
 
@@ -207,6 +189,144 @@ function buildNormalizedDebugMessage(normalizedSlip) {
     "",
     "Normalized legs:",
     ...lines
+  ].join("\n");
+}
+
+function mapMarketLabelForBook(book, leg) {
+  const marketType = leg.marketType || "";
+
+  const labels = {
+    FanDuel: {
+      player_home_run: "To Hit a Home Run",
+      player_total_bases: leg.line ? `${leg.line} Total Bases` : "Total Bases",
+      player_hits: leg.line ? `${leg.line} Hits` : "Hits",
+      player_points: leg.line ? `${leg.line} Points` : "Points",
+      player_rebounds: leg.line ? `${leg.line} Rebounds` : "Rebounds",
+      player_assists: leg.line ? `${leg.line} Assists` : "Assists",
+      player_threes: leg.line ? `${leg.line} Threes` : "Made Threes"
+    },
+    DraftKings: {
+      player_home_run: "To Hit A Home Run",
+      player_total_bases: leg.line ? `${leg.line} Total Bases` : "Total Bases",
+      player_hits: leg.line ? `${leg.line} Hits` : "Hits",
+      player_points: leg.line ? `${leg.line} Points` : "Points",
+      player_rebounds: leg.line ? `${leg.line} Rebounds` : "Rebounds",
+      player_assists: leg.line ? `${leg.line} Assists` : "Assists",
+      player_threes: leg.line ? `${leg.line} Threes` : "Threes"
+    },
+    BetMGM: {
+      player_home_run: "Player To Hit Home Run",
+      player_total_bases: leg.line ? `${leg.line} Total Bases` : "Player Total Bases",
+      player_hits: leg.line ? `${leg.line} Hits` : "Player Hits",
+      player_points: leg.line ? `${leg.line} Points` : "Player Points",
+      player_rebounds: leg.line ? `${leg.line} Rebounds` : "Player Rebounds",
+      player_assists: leg.line ? `${leg.line} Assists` : "Player Assists",
+      player_threes: leg.line ? `${leg.line} Made Threes` : "Player Made Threes"
+    },
+    Caesars: {
+      player_home_run: "To Hit Home Run",
+      player_total_bases: leg.line ? `${leg.line} Total Bases` : "Total Bases",
+      player_hits: leg.line ? `${leg.line} Hits` : "Hits",
+      player_points: leg.line ? `${leg.line} Points` : "Points",
+      player_rebounds: leg.line ? `${leg.line} Rebounds` : "Rebounds",
+      player_assists: leg.line ? `${leg.line} Assists` : "Assists",
+      player_threes: leg.line ? `${leg.line} 3PM` : "3PM"
+    },
+    "ESPN Bet": {
+      player_home_run: "To Hit a Home Run",
+      player_total_bases: leg.line ? `${leg.line} Total Bases` : "Total Bases",
+      player_hits: leg.line ? `${leg.line} Hits` : "Hits",
+      player_points: leg.line ? `${leg.line} Points` : "Points",
+      player_rebounds: leg.line ? `${leg.line} Rebounds` : "Rebounds",
+      player_assists: leg.line ? `${leg.line} Assists` : "Assists",
+      player_threes: leg.line ? `${leg.line} Threes` : "Threes"
+    }
+  };
+
+  return labels[book]?.[marketType] || leg.rawMarket || marketType;
+}
+
+function estimateConfidence(book, leg) {
+  let score = 0.7;
+
+  if (leg.league) score += 0.1;
+  if (leg.event) score += 0.05;
+  if (leg.participant) score += 0.05;
+  if (leg.marketType) score += 0.05;
+  if (leg.line) score += 0.05;
+
+  if (book === "FanDuel" && leg.marketType === "player_home_run") score += 0.02;
+  if (book === "DraftKings" && leg.marketType === "player_total_bases") score += 0.02;
+  if (book === "BetMGM" && leg.marketType === "player_points") score += 0.02;
+
+  return Math.min(score, 0.99);
+}
+
+function simulateMatchLeg(book, leg) {
+  const marketLabel = mapMarketLabelForBook(book, leg);
+  const confidence = estimateConfidence(book, leg);
+  const status = confidence >= 0.8 ? "matched" : "review";
+
+  return {
+    sportsbook: book,
+    participant: leg.participant,
+    event: leg.event,
+    marketType: leg.marketType,
+    displayMarket: marketLabel,
+    line: leg.line,
+    status,
+    confidence,
+    searchText: `${leg.participant} ${marketLabel}`.trim()
+  };
+}
+
+function simulateMatchSlip(book, normalizedSlip) {
+  const legs = normalizedSlip.legs || [];
+  const matchedLegs = legs.map((leg) => simulateMatchLeg(book, leg));
+
+  return {
+    sportsbook: book,
+    betType: normalizedSlip.betType,
+    legs: matchedLegs
+  };
+}
+
+function buildMatchDebugMessage(matchResult) {
+  const lines = matchResult.legs.map((leg, i) => {
+    return [
+      `${i + 1}. ${leg.participant}`,
+      `   market: ${leg.displayMarket}`,
+      `   status: ${leg.status}`,
+      `   confidence: ${leg.confidence.toFixed(2)}`,
+      `   searchText: ${leg.searchText}`
+    ].join("\n");
+  });
+
+  return [
+    `${matchResult.sportsbook} match debug:`,
+    "",
+    `betType: ${matchResult.betType || ""}`,
+    "",
+    "Matched legs:",
+    ...lines
+  ].join("\n");
+}
+
+function buildRebuildMessage(book, matchResult) {
+  const lines = matchResult.legs.map((leg) => {
+    const confidenceTag = leg.status === "matched" ? "✅" : "⚠️";
+    return `• ${confidenceTag} ${leg.searchText}`;
+  });
+
+  return [
+    `🎯 ${book} Ready`,
+    "",
+    "Rebuild list:",
+    "",
+    ...lines,
+    "",
+    "Matched = high-confidence sportsbook version.",
+    "Review = likely right, but double-check before placing."
   ].join("\n");
 }
 
@@ -321,6 +441,7 @@ app.post("/webhook", async (req, res) => {
           userSlipStore[sender] = {
             parsedSlip,
             normalizedSlip,
+            matchedByBook: {},
             savedAt: Date.now()
           };
 
@@ -351,7 +472,23 @@ app.post("/webhook", async (req, res) => {
               continue;
             }
 
-            await sendMessage(sender, buildRebuildMessage(book, saved.normalizedSlip));
+            const matchResult = simulateMatchSlip(book, saved.normalizedSlip);
+            saved.matchedByBook[book] = matchResult;
+
+            await sendMessage(sender, buildRebuildMessage(book, matchResult));
+            continue;
+          }
+
+          if (lowered === "match debug") {
+            const saved = userSlipStore[sender];
+            const books = saved?.matchedByBook ? Object.keys(saved.matchedByBook) : [];
+
+            if (!books.length) {
+              await sendMessage(sender, "No matched sportsbook version yet. Reply with a sportsbook first.");
+            } else {
+              const latestBook = books[books.length - 1];
+              await sendMessage(sender, buildMatchDebugMessage(saved.matchedByBook[latestBook]));
+            }
             continue;
           }
 
