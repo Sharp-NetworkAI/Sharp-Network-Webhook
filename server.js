@@ -11,7 +11,7 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const userSlipStore = {};
 
 /* =========================
-   STEP 1: MOCK EVENT SOURCE
+   MOCK DATA
 ========================= */
 function getMockBetMGMEvents() {
   return [
@@ -19,11 +19,24 @@ function getMockBetMGMEvents() {
       fixtureId: "MGM_REAL_FIXTURE_001",
       homeTeam: "San Francisco Giants",
       awayTeam: "New York Yankees"
-    },
+    }
+  ];
+}
+
+function getMockBetMGMMkts() {
+  return [
     {
-      fixtureId: "MGM_REAL_FIXTURE_002",
-      homeTeam: "Los Angeles Dodgers",
-      awayTeam: "Chicago Cubs"
+      fixtureId: "MGM_REAL_FIXTURE_001",
+      markets: [
+        {
+          marketId: "MGM_MARKET_HR",
+          type: "player_home_run"
+        },
+        {
+          marketId: "MGM_MARKET_TOTAL_BASES",
+          type: "player_total_bases"
+        }
+      ]
     }
   ];
 }
@@ -31,132 +44,125 @@ function getMockBetMGMEvents() {
 /* =========================
    HELPERS
 ========================= */
-function normalizeBookName(text) {
-  const t = (text || "").toLowerCase().trim();
-
-  if (t === "fanduel") return "FanDuel";
-  if (t === "draftkings") return "DraftKings";
-  if (t === "betmgm") return "BetMGM";
-  if (t === "caesars") return "Caesars";
-  if (t.includes("espn")) return "ESPN Bet";
-
-  return null;
-}
-
 function safeParseJSON(text) {
   try {
     return JSON.parse(text);
   } catch {
-    const match = text.match(/\{[\s\S]*\}/);
-    if (match) {
-      try {
-        return JSON.parse(match[0]);
-      } catch {}
-    }
+    return null;
   }
-  return null;
 }
 
 function clean(v) {
-  return String(v || "").replace(/\s+/g, " ").trim();
+  return String(v || "").trim();
 }
 
 /* =========================
    NORMALIZATION
 ========================= */
 function normalizeMarketType(market = "") {
-  const m = clean(market).toLowerCase();
+  const m = market.toLowerCase();
 
   if (m.includes("home run")) return "player_home_run";
   if (m.includes("total bases")) return "player_total_bases";
 
-  return m.replace(/\s+/g, "_");
+  return m;
 }
 
 function extractLine(market = "") {
-  const text = clean(market);
-  const plusMatch = text.match(/(\d+(\.\d+)?)\+/);
-
-  if (plusMatch) return plusMatch[1] + "+";
-
-  return "";
+  const match = market.match(/(\d+)\+/);
+  return match ? match[1] + "+" : "";
 }
 
-function normalizeLeg(leg = {}) {
+function normalizeLeg(leg) {
   return {
     event: clean(leg.event),
     participant: clean(leg.selection),
     marketType: normalizeMarketType(leg.market),
     line: extractLine(leg.market),
-    rawMarket: clean(leg.market)
-  };
-}
-
-function normalizeSlip(parsedSlip = {}) {
-  return {
-    betType: clean(parsedSlip.bet_type),
-    legs: (parsedSlip.legs || []).map(normalizeLeg)
+    rawMarket: leg.market
   };
 }
 
 /* =========================
-   FIXTURE RESOLVER (STEP 1)
+   RESOLVERS
 ========================= */
-async function searchBetMGMFixtures(normalizedLeg) {
+async function searchBetMGMFixtures(leg) {
   const events = getMockBetMGMEvents();
-  const eventText = normalizedLeg.event.toLowerCase();
+  const text = leg.event.toLowerCase();
 
-  for (const event of events) {
-    const home = event.homeTeam.toLowerCase();
-    const away = event.awayTeam.toLowerCase();
-
+  for (const e of events) {
     if (
-      eventText.includes(home.split(" ")[0]) &&
-      eventText.includes(away.split(" ")[0])
+      text.includes("yankees") &&
+      text.includes("giants")
     ) {
       return {
         resolved: true,
-        fixtureId: event.fixtureId
+        fixtureId: e.fixtureId
       };
     }
   }
 
+  return { resolved: false };
+}
+
+async function searchBetMGMMarkets(fixtureId, leg) {
+  const data = getMockBetMGMMkts();
+  const match = data.find(d => d.fixtureId === fixtureId);
+
+  if (!match) return { resolved: false };
+
+  const market = match.markets.find(
+    m => m.type === leg.marketType
+  );
+
+  if (!market) return { resolved: false };
+
   return {
-    resolved: false,
-    reason: "No matching mock event found"
+    resolved: true,
+    marketId: market.marketId
+  };
+}
+
+async function resolveLeg(leg) {
+  const fixture = await searchBetMGMFixtures(leg);
+
+  if (!fixture.resolved) {
+    return {
+      ...leg,
+      fixtureId: "NOT_FOUND",
+      marketId: "NOT_FOUND"
+    };
+  }
+
+  const market = await searchBetMGMMarkets(
+    fixture.fixtureId,
+    leg
+  );
+
+  return {
+    ...leg,
+    fixtureId: fixture.fixtureId,
+    marketId: market.resolved
+      ? market.marketId
+      : "NOT_FOUND"
   };
 }
 
 /* =========================
-   RESPONSE BUILDERS
+   RESPONSE
 ========================= */
-function buildSlipSummary(slip) {
-  return [
-    "Slip copied ✅",
-    "",
-    `${slip.legs.length} legs detected`,
-    "",
-    "Reply with:",
-    "• BetMGM"
-  ].join("\n");
-}
-
-function buildPayloadDebug(matchResult) {
-  const lines = matchResult.map((leg, i) => {
-    return [
-      `${i + 1}. ${leg.participant}`,
-      `   fixtureId: ${leg.fixtureId}`,
-      leg.note ? `   note: ${leg.note}` : null
-    ]
-      .filter(Boolean)
-      .join("\n");
-  });
-
-  return ["BetMGM payload debug:", "", ...lines].join("\n");
+function buildDebug(resolved) {
+  return resolved
+    .map((l, i) => {
+      return `${i + 1}. ${l.participant}
+fixtureId: ${l.fixtureId}
+marketId: ${l.marketId}`;
+    })
+    .join("\n\n");
 }
 
 /* =========================
-   SEND MESSAGE
+   SEND
 ========================= */
 async function sendMessage(id, text) {
   await fetch(
@@ -175,13 +181,10 @@ async function sendMessage(id, text) {
 /* =========================
    ROUTES
 ========================= */
-app.get("/", (_req, res) => {
-  res.send("Running");
-});
+app.get("/", (req, res) => res.send("running"));
 
 app.get("/webhook", (req, res) => {
   if (
-    req.query["hub.mode"] === "subscribe" &&
     req.query["hub.verify_token"] === VERIFY_TOKEN
   ) {
     return res.send(req.query["hub.challenge"]);
@@ -190,30 +193,28 @@ app.get("/webhook", (req, res) => {
 });
 
 app.post("/webhook", async (req, res) => {
-  try {
-    const body = req.body;
+  for (const entry of req.body.entry || []) {
+    for (const event of entry.messaging || []) {
 
-    for (const entry of body.entry || []) {
-      for (const event of entry.messaging || []) {
-        if (!event.message || event.message.is_echo) continue;
+      if (!event.message) continue;
 
-        const sender = event.sender.id;
-        const text = event.message.text || "";
+      const sender = event.sender.id;
+      const text = event.message.text;
 
-        let imageUrl = null;
+      let imageUrl = null;
 
-        if (event.message.attachments) {
-          for (const a of event.message.attachments) {
-            if (a.type === "image") {
-              imageUrl = a.payload.url;
-              break;
-            }
-          }
-        }
+      if (event.message.attachments) {
+        const img = event.message.attachments.find(
+          a => a.type === "image"
+        );
+        if (img) imageUrl = img.payload.url;
+      }
 
-        /* IMAGE HANDLING */
-        if (imageUrl) {
-          const openai = await fetch("https://api.openai.com/v1/responses", {
+      /* IMAGE */
+      if (imageUrl) {
+        const ai = await fetch(
+          "https://api.openai.com/v1/responses",
+          {
             method: "POST",
             headers: {
               Authorization: `Bearer ${OPENAI_API_KEY}`,
@@ -228,7 +229,7 @@ app.post("/webhook", async (req, res) => {
                     {
                       type: "input_text",
                       text:
-                        'Return ONLY JSON: {"bet_type":"","legs":[{"event":"","market":"","selection":""}]}'
+                        'Return JSON: {"legs":[{"event":"","market":"","selection":""}]}'
                     },
                     {
                       type: "input_image",
@@ -238,78 +239,61 @@ app.post("/webhook", async (req, res) => {
                 }
               ]
             })
-          });
-
-          const data = await openai.json();
-          const raw = data.output?.[0]?.content?.[0]?.text || "";
-          const parsed = safeParseJSON(raw);
-
-          if (!parsed) {
-            await sendMessage(sender, "Parse failed");
-            continue;
           }
+        );
 
-          const normalized = normalizeSlip(parsed);
+        const data = await ai.json();
+        const parsed = safeParseJSON(
+          data.output?.[0]?.content?.[0]?.text || ""
+        );
 
-          userSlipStore[sender] = normalized;
-
-          await sendMessage(sender, buildSlipSummary(normalized));
+        if (!parsed) {
+          await sendMessage(sender, "parse failed");
           continue;
         }
 
-        /* BETMGM COMMAND */
-        if (text.toLowerCase() === "betmgm") {
-          const saved = userSlipStore[sender];
+        userSlipStore[sender] = parsed.legs.map(normalizeLeg);
 
-          if (!saved) {
-            await sendMessage(sender, "Send slip first");
-            continue;
-          }
-
-          const results = [];
-
-          for (const leg of saved.legs) {
-            const reso = await searchBetMGMFixtures(leg);
-
-            results.push({
-              participant: leg.participant,
-              fixtureId: reso.resolved
-                ? reso.fixtureId
-                : "NOT_FOUND",
-              note: reso.reason
-            });
-          }
-
-          userSlipStore[sender].resolved = results;
-
-          await sendMessage(sender, "Fixture matching complete");
-          continue;
-        }
-
-        /* DEBUG */
-        if (text.toLowerCase() === "payload debug") {
-          const saved = userSlipStore[sender];
-
-          if (!saved?.resolved) {
-            await sendMessage(sender, "Run BetMGM first");
-            continue;
-          }
-
-          await sendMessage(sender, buildPayloadDebug(saved.resolved));
-          continue;
-        }
-
-        await sendMessage(sender, "Send a betting slip image.");
+        await sendMessage(sender, "Slip saved. Type BetMGM");
+        continue;
       }
-    }
 
-    res.sendStatus(200);
-  } catch (e) {
-    console.error(e);
-    res.sendStatus(500);
+      /* BETMGM */
+      if (text?.toLowerCase() === "betmgm") {
+        const legs = userSlipStore[sender];
+
+        const resolved = [];
+
+        for (const leg of legs) {
+          resolved.push(await resolveLeg(leg));
+        }
+
+        userSlipStore[sender] = { resolved };
+
+        await sendMessage(sender, "Resolved");
+        continue;
+      }
+
+      /* DEBUG */
+      if (text?.toLowerCase() === "payload debug") {
+        const data = userSlipStore[sender]?.resolved;
+
+        if (!data) {
+          await sendMessage(sender, "Run BetMGM first");
+          continue;
+        }
+
+        await sendMessage(sender, buildDebug(data));
+        continue;
+      }
+
+      await sendMessage(sender, "Send slip image");
+    }
   }
+
+  res.sendStatus(200);
 });
 
 app.listen(PORT, () => {
-  console.log("Server running");
+  console.log("server running");
 });
