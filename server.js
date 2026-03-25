@@ -22,18 +22,33 @@ function normalizeBookName(text) {
   return null;
 }
 
+function safeParseJSON(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    // try to extract JSON if model added extra text
+    const match = text.match(/\{[\s\S]*\}/);
+    if (match) {
+      try {
+        return JSON.parse(match[0]);
+      } catch {}
+    }
+  }
+  return null;
+}
+
 function buildSlipSummary(slip) {
   const legs = slip.legs || [];
 
-  const legLines = legs.map((leg, i) => {
-    return `${i + 1}. ${leg.selection} — ${leg.market}`;
+  const lines = legs.map((l, i) => {
+    return `${i + 1}. ${l.selection} — ${l.market}`;
   });
 
   return [
     "Slip copied.",
     "",
     "Legs:",
-    ...legLines,
+    ...lines,
     "",
     "Reply with your sportsbook:",
     "FanDuel",
@@ -47,8 +62,8 @@ function buildSlipSummary(slip) {
 function buildRebuildMessage(book, slip) {
   const legs = slip.legs || [];
 
-  const lines = legs.map((leg, i) => {
-    return `${i + 1}. ${leg.selection} — ${leg.market}`;
+  const lines = legs.map((l, i) => {
+    return `${i + 1}. ${l.selection} — ${l.market}`;
   });
 
   return [
@@ -65,7 +80,9 @@ async function sendMessage(id, text) {
     `https://graph.facebook.com/v18.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`,
     {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json"
+      },
       body: JSON.stringify({
         recipient: { id },
         message: { text }
@@ -120,7 +137,7 @@ app.post("/webhook", async (req, res) => {
                   {
                     type: "input_text",
                     text:
-                      "Extract this betting slip into JSON with fields bet_type, odds, stake, payout, and legs (selection + market only)."
+                      "Return ONLY valid JSON. Extract betting slip into: {bet_type, odds, stake, payout, legs:[{selection, market}]}."
                   },
                   {
                     type: "input_image",
@@ -134,11 +151,9 @@ app.post("/webhook", async (req, res) => {
 
         const data = await openai.json();
 
-        let slip = null;
+        const raw = data.output?.[0]?.content?.[0]?.text || "";
 
-        try {
-          slip = JSON.parse(data.output[0].content[0].text);
-        } catch {}
+        const slip = safeParseJSON(raw);
 
         if (!slip) {
           await sendMessage(sender, "Couldn't read slip.");
@@ -155,21 +170,12 @@ app.post("/webhook", async (req, res) => {
           const saved = userSlipStore[sender];
 
           if (!saved) {
-            await sendMessage(
-              sender,
-              "Send a betting slip image first."
-            );
+            await sendMessage(sender, "Send a betting slip first.");
           } else {
-            await sendMessage(
-              sender,
-              buildRebuildMessage(book, saved)
-            );
+            await sendMessage(sender, buildRebuildMessage(book, saved));
           }
         } else {
-          await sendMessage(
-            sender,
-            "Send a betting slip image."
-          );
+          await sendMessage(sender, "Send a betting slip image.");
         }
       }
     }
