@@ -8,6 +8,10 @@ const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "sharpnetworkbot";
 const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
+// Optional future env vars for real BetMGM integration
+const BETMGM_API_BASE = process.env.BETMGM_API_BASE || "";
+const BETMGM_API_KEY = process.env.BETMGM_API_KEY || "";
+
 const userSlipStore = {};
 
 function normalizeBookName(text) {
@@ -376,9 +380,87 @@ function simulateMatchSlip(book, normalizedSlip) {
   return {
     sportsbook: book,
     betType: normalizedSlip.betType,
-    matchedLegs
+    matchedLegs,
+    resolverStatus: book === "BetMGM" ? "resolver_scaffold_ready" : "simulated_only"
   };
 }
+
+// -------- BetMGM resolver scaffold --------
+
+async function searchBetMGMFixtures(normalizedLeg) {
+  // Placeholder for future real API search.
+  // This is where you would query BetMGM by league + teams/event.
+  return {
+    resolved: false,
+    reason: "No live BetMGM fixture resolver connected yet.",
+    requested: {
+      league: normalizedLeg.league,
+      event: normalizedLeg.event
+    }
+  };
+}
+
+async function searchBetMGMMarketAndOption(normalizedLeg) {
+  // Placeholder for future real API search.
+  // This is where you would resolve market + option IDs.
+  return {
+    resolved: false,
+    reason: "No live BetMGM market resolver connected yet.",
+    requested: {
+      participant: normalizedLeg.participant,
+      marketType: normalizedLeg.marketType,
+      line: normalizedLeg.line
+    }
+  };
+}
+
+async function resolveBetMGMLeg(matchedLeg) {
+  const fixtureResolution = await searchBetMGMFixtures(matchedLeg);
+  const marketResolution = await searchBetMGMMarketAndOption(matchedLeg);
+
+  if (fixtureResolution.resolved && marketResolution.resolved) {
+    return {
+      ...matchedLeg,
+      fixtureId: fixtureResolution.fixtureId,
+      marketId: marketResolution.marketId,
+      optionId: marketResolution.optionId,
+      status: "resolved",
+      resolver: "betmgm_live",
+      builderPayload: {
+        ...matchedLeg.builderPayload,
+        fixtureId: fixtureResolution.fixtureId,
+        marketId: marketResolution.marketId,
+        optionId: marketResolution.optionId
+      }
+    };
+  }
+
+  return {
+    ...matchedLeg,
+    resolver: "betmgm_scaffold",
+    resolutionNotes: [
+      fixtureResolution.reason,
+      marketResolution.reason
+    ].filter(Boolean)
+  };
+}
+
+async function resolveBetMGMSlip(matchResult) {
+  const resolvedLegs = [];
+
+  for (const leg of matchResult.matchedLegs) {
+    const resolvedLeg = await resolveBetMGMLeg(leg);
+    resolvedLegs.push(resolvedLeg);
+  }
+
+  return {
+    ...matchResult,
+    resolverStatus: "betmgm_scaffold",
+    matchedLegs: resolvedLegs
+  };
+}
+
+// -------- Message builders --------
 
 function buildMatchDebugMessage(matchResult) {
   const lines = matchResult.matchedLegs.map((leg, i) => {
@@ -399,6 +481,7 @@ function buildMatchDebugMessage(matchResult) {
     `${matchResult.sportsbook} match debug:`,
     "",
     `betType: ${matchResult.betType || ""}`,
+    `resolverStatus: ${matchResult.resolverStatus || ""}`,
     "",
     "Matched legs:",
     ...lines
@@ -412,12 +495,17 @@ function buildPayloadDebugMessage(matchResult) {
       `   fixtureId: ${leg.fixtureId}`,
       `   marketId: ${leg.marketId}`,
       `   optionId: ${leg.optionId}`,
-      `   builderPayload: ${JSON.stringify(leg.builderPayload)}`
-    ].join("\n");
+      `   builderPayload: ${JSON.stringify(leg.builderPayload)}`,
+      leg.resolutionNotes?.length
+        ? `   resolutionNotes: ${leg.resolutionNotes.join(" | ")}`
+        : null
+    ].filter(Boolean).join("\n");
   });
 
   return [
     `${matchResult.sportsbook} payload debug:`,
+    "",
+    `resolverStatus: ${matchResult.resolverStatus || ""}`,
     "",
     "Betslip-ready leg objects:",
     ...lines
@@ -426,9 +514,21 @@ function buildPayloadDebugMessage(matchResult) {
 
 function buildRebuildMessage(book, matchResult) {
   const lines = matchResult.matchedLegs.map((leg) => {
-    const confidenceTag = leg.status === "matched" ? "✅" : "⚠️";
+    const confidenceTag = leg.status === "matched" || leg.status === "resolved" ? "✅" : "⚠️";
     return `• ${confidenceTag} ${leg.searchText}`;
   });
+
+  const footer =
+    book === "BetMGM"
+      ? [
+          "Matched = high-confidence sportsbook version.",
+          "Resolver scaffold is active for BetMGM.",
+          "Reply payload debug to inspect betslip-ready objects."
+        ]
+      : [
+          "Matched = high-confidence sportsbook version.",
+          "Review = likely right, but double-check before placing."
+        ];
 
   return [
     `🎯 ${book} Ready`,
@@ -437,8 +537,7 @@ function buildRebuildMessage(book, matchResult) {
     "",
     ...lines,
     "",
-    "Matched = high-confidence sportsbook version.",
-    "Review = likely right, but double-check before placing."
+    ...footer
   ].join("\n");
 }
 
@@ -584,7 +683,12 @@ app.post("/webhook", async (req, res) => {
               continue;
             }
 
-            const matchResult = simulateMatchSlip(book, saved.normalizedSlip);
+            let matchResult = simulateMatchSlip(book, saved.normalizedSlip);
+
+            if (book === "BetMGM") {
+              matchResult = await resolveBetMGMSlip(matchResult);
+            }
+
             saved.matchedByBook[book] = matchResult;
 
             await sendMessage(sender, buildRebuildMessage(book, matchResult));
