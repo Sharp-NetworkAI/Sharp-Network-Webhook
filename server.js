@@ -48,8 +48,14 @@ function safeParseJSON(text) {
   try {
     return JSON.parse(text);
   } catch {
-    return null;
+    const match = text.match(/\{[\s\S]*\}/);
+    if (match) {
+      try {
+        return JSON.parse(match[0]);
+      } catch {}
+    }
   }
+  return null;
 }
 
 function clean(v) {
@@ -229,7 +235,7 @@ app.post("/webhook", async (req, res) => {
                     {
                       type: "input_text",
                       text:
-                        'Return JSON: {"legs":[{"event":"","market":"","selection":""}]}'
+                        'Return ONLY valid JSON. No explanation. No markdown. Format EXACTLY like this: {"bet_type":"","source_sportsbook":"","odds":"","stake":"","payout":"","legs":[{"event":"","market":"","selection":""}]}'
                     },
                     {
                       type: "input_image",
@@ -243,9 +249,8 @@ app.post("/webhook", async (req, res) => {
         );
 
         const data = await ai.json();
-        const parsed = safeParseJSON(
-          data.output?.[0]?.content?.[0]?.text || ""
-        );
+        const raw = data.output?.[0]?.content?.[0]?.text || "";
+        const parsed = safeParseJSON(raw);
 
         if (!parsed) {
           await sendMessage(sender, "parse failed");
@@ -254,13 +259,18 @@ app.post("/webhook", async (req, res) => {
 
         userSlipStore[sender] = parsed.legs.map(normalizeLeg);
 
-        await sendMessage(sender, "Slip saved. Type BetMGM");
+        await sendMessage(sender, "Slip copied ✅\n\nReply: BetMGM");
         continue;
       }
 
       /* BETMGM */
       if (text?.toLowerCase() === "betmgm") {
         const legs = userSlipStore[sender];
+
+        if (!legs) {
+          await sendMessage(sender, "Send slip first");
+          continue;
+        }
 
         const resolved = [];
 
