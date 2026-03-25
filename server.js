@@ -192,6 +192,62 @@ function buildNormalizedDebugMessage(normalizedSlip) {
   ].join("\n");
 }
 
+function mapMarketKey(marketType, book) {
+  const table = {
+    player_home_run: {
+      FanDuel: "FD_PLAYER_HR",
+      DraftKings: "DK_PLAYER_HR",
+      BetMGM: "MGM_PLAYER_HR",
+      Caesars: "CZR_PLAYER_HR",
+      "ESPN Bet": "ESPN_PLAYER_HR"
+    },
+    player_total_bases: {
+      FanDuel: "FD_PLAYER_TOTAL_BASES",
+      DraftKings: "DK_PLAYER_TOTAL_BASES",
+      BetMGM: "MGM_PLAYER_TOTAL_BASES",
+      Caesars: "CZR_PLAYER_TOTAL_BASES",
+      "ESPN Bet": "ESPN_PLAYER_TOTAL_BASES"
+    },
+    player_hits: {
+      FanDuel: "FD_PLAYER_HITS",
+      DraftKings: "DK_PLAYER_HITS",
+      BetMGM: "MGM_PLAYER_HITS",
+      Caesars: "CZR_PLAYER_HITS",
+      "ESPN Bet": "ESPN_PLAYER_HITS"
+    },
+    player_points: {
+      FanDuel: "FD_PLAYER_POINTS",
+      DraftKings: "DK_PLAYER_POINTS",
+      BetMGM: "MGM_PLAYER_POINTS",
+      Caesars: "CZR_PLAYER_POINTS",
+      "ESPN Bet": "ESPN_PLAYER_POINTS"
+    },
+    player_rebounds: {
+      FanDuel: "FD_PLAYER_REBOUNDS",
+      DraftKings: "DK_PLAYER_REBOUNDS",
+      BetMGM: "MGM_PLAYER_REBOUNDS",
+      Caesars: "CZR_PLAYER_REBOUNDS",
+      "ESPN Bet": "ESPN_PLAYER_REBOUNDS"
+    },
+    player_assists: {
+      FanDuel: "FD_PLAYER_ASSISTS",
+      DraftKings: "DK_PLAYER_ASSISTS",
+      BetMGM: "MGM_PLAYER_ASSISTS",
+      Caesars: "CZR_PLAYER_ASSISTS",
+      "ESPN Bet": "ESPN_PLAYER_ASSISTS"
+    },
+    player_threes: {
+      FanDuel: "FD_PLAYER_THREES",
+      DraftKings: "DK_PLAYER_THREES",
+      BetMGM: "MGM_PLAYER_THREES",
+      Caesars: "CZR_PLAYER_THREES",
+      "ESPN Bet": "ESPN_PLAYER_THREES"
+    }
+  };
+
+  return table[marketType]?.[book] || `${book.toUpperCase().replace(/\s+/g, "_")}_${marketType.toUpperCase()}`;
+}
+
 function mapMarketLabelForBook(book, leg) {
   const marketType = leg.marketType || "";
 
@@ -249,21 +305,22 @@ function mapMarketLabelForBook(book, leg) {
 function estimateConfidence(book, leg) {
   let score = 0.7;
 
-  if (leg.league) score += 0.1;
+  if (leg.league) score += 0.08;
   if (leg.event) score += 0.05;
-  if (leg.participant) score += 0.05;
-  if (leg.marketType) score += 0.05;
+  if (leg.participant) score += 0.06;
+  if (leg.marketType) score += 0.06;
   if (leg.line) score += 0.05;
 
-  if (book === "FanDuel" && leg.marketType === "player_home_run") score += 0.02;
-  if (book === "DraftKings" && leg.marketType === "player_total_bases") score += 0.02;
-  if (book === "BetMGM" && leg.marketType === "player_points") score += 0.02;
+  if (book === "FanDuel" && leg.marketType === "player_home_run") score += 0.03;
+  if (book === "DraftKings" && leg.marketType === "player_total_bases") score += 0.03;
+  if (book === "BetMGM" && leg.marketType === "player_points") score += 0.03;
 
   return Math.min(score, 0.99);
 }
 
 function simulateMatchLeg(book, leg) {
-  const marketLabel = mapMarketLabelForBook(book, leg);
+  const mappedMarketKey = mapMarketKey(leg.marketType, book);
+  const displayMarket = mapMarketLabelForBook(book, leg);
   const confidence = estimateConfidence(book, leg);
   const status = confidence >= 0.8 ? "matched" : "review";
 
@@ -271,12 +328,14 @@ function simulateMatchLeg(book, leg) {
     sportsbook: book,
     participant: leg.participant,
     event: leg.event,
+    league: leg.league,
     marketType: leg.marketType,
-    displayMarket: marketLabel,
+    mappedMarketKey,
+    displayMarket,
     line: leg.line,
     status,
     confidence,
-    searchText: `${leg.participant} ${marketLabel}`.trim()
+    searchText: `${leg.participant} ${displayMarket}`.trim()
   };
 }
 
@@ -287,15 +346,16 @@ function simulateMatchSlip(book, normalizedSlip) {
   return {
     sportsbook: book,
     betType: normalizedSlip.betType,
-    legs: matchedLegs
+    matchedLegs
   };
 }
 
 function buildMatchDebugMessage(matchResult) {
-  const lines = matchResult.legs.map((leg, i) => {
+  const lines = matchResult.matchedLegs.map((leg, i) => {
     return [
       `${i + 1}. ${leg.participant}`,
       `   market: ${leg.displayMarket}`,
+      `   mappedMarketKey: ${leg.mappedMarketKey}`,
       `   status: ${leg.status}`,
       `   confidence: ${leg.confidence.toFixed(2)}`,
       `   searchText: ${leg.searchText}`
@@ -313,7 +373,7 @@ function buildMatchDebugMessage(matchResult) {
 }
 
 function buildRebuildMessage(book, matchResult) {
-  const lines = matchResult.legs.map((leg) => {
+  const lines = matchResult.matchedLegs.map((leg) => {
     const confidenceTag = leg.status === "matched" ? "✅" : "⚠️";
     return `• ${confidenceTag} ${leg.searchText}`;
   });
