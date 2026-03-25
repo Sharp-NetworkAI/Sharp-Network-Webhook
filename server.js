@@ -318,11 +318,37 @@ function estimateConfidence(book, leg) {
   return Math.min(score, 0.99);
 }
 
+function buildSimId(prefix, value) {
+  const cleaned = clean(value)
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 40);
+
+  return `${prefix}_${cleaned || "SIM"}`;
+}
+
+function buildBuilderPayload(book, leg, mappedMarketKey) {
+  return {
+    sportsbook: book,
+    participant: leg.participant,
+    event: leg.event,
+    marketKey: mappedMarketKey,
+    marketType: leg.marketType,
+    line: leg.line || "",
+    query: `${leg.participant} ${leg.rawMarket}`.trim()
+  };
+}
+
 function simulateMatchLeg(book, leg) {
   const mappedMarketKey = mapMarketKey(leg.marketType, book);
   const displayMarket = mapMarketLabelForBook(book, leg);
   const confidence = estimateConfidence(book, leg);
   const status = confidence >= 0.8 ? "matched" : "review";
+
+  const fixtureId = buildSimId(`${book.slice(0, 3).toUpperCase()}_FIXTURE`, leg.event);
+  const marketId = buildSimId(`${book.slice(0, 3).toUpperCase()}_MARKET`, `${mappedMarketKey}_${leg.line || "NA"}`);
+  const optionId = buildSimId(`${book.slice(0, 3).toUpperCase()}_OPTION`, `${leg.participant}_${mappedMarketKey}_${leg.line || "NA"}`);
 
   return {
     sportsbook: book,
@@ -335,7 +361,11 @@ function simulateMatchLeg(book, leg) {
     line: leg.line,
     status,
     confidence,
-    searchText: `${leg.participant} ${displayMarket}`.trim()
+    searchText: `${leg.participant} ${displayMarket}`.trim(),
+    fixtureId,
+    marketId,
+    optionId,
+    builderPayload: buildBuilderPayload(book, leg, mappedMarketKey)
   };
 }
 
@@ -356,6 +386,9 @@ function buildMatchDebugMessage(matchResult) {
       `${i + 1}. ${leg.participant}`,
       `   market: ${leg.displayMarket}`,
       `   mappedMarketKey: ${leg.mappedMarketKey}`,
+      `   fixtureId: ${leg.fixtureId}`,
+      `   marketId: ${leg.marketId}`,
+      `   optionId: ${leg.optionId}`,
       `   status: ${leg.status}`,
       `   confidence: ${leg.confidence.toFixed(2)}`,
       `   searchText: ${leg.searchText}`
@@ -368,6 +401,25 @@ function buildMatchDebugMessage(matchResult) {
     `betType: ${matchResult.betType || ""}`,
     "",
     "Matched legs:",
+    ...lines
+  ].join("\n");
+}
+
+function buildPayloadDebugMessage(matchResult) {
+  const lines = matchResult.matchedLegs.map((leg, i) => {
+    return [
+      `${i + 1}. ${leg.participant}`,
+      `   fixtureId: ${leg.fixtureId}`,
+      `   marketId: ${leg.marketId}`,
+      `   optionId: ${leg.optionId}`,
+      `   builderPayload: ${JSON.stringify(leg.builderPayload)}`
+    ].join("\n");
+  });
+
+  return [
+    `${matchResult.sportsbook} payload debug:`,
+    "",
+    "Betslip-ready leg objects:",
     ...lines
   ].join("\n");
 }
@@ -548,6 +600,19 @@ app.post("/webhook", async (req, res) => {
             } else {
               const latestBook = books[books.length - 1];
               await sendMessage(sender, buildMatchDebugMessage(saved.matchedByBook[latestBook]));
+            }
+            continue;
+          }
+
+          if (lowered === "payload debug") {
+            const saved = userSlipStore[sender];
+            const books = saved?.matchedByBook ? Object.keys(saved.matchedByBook) : [];
+
+            if (!books.length) {
+              await sendMessage(sender, "No matched sportsbook version yet. Reply with a sportsbook first.");
+            } else {
+              const latestBook = books[books.length - 1];
+              await sendMessage(sender, buildPayloadDebugMessage(saved.matchedByBook[latestBook]));
             }
             continue;
           }
