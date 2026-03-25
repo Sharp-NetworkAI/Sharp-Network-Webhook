@@ -11,13 +11,13 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const userSlipStore = {};
 
 function normalizeBookName(text) {
-  const cleaned = (text || "").trim().toLowerCase();
+  const t = (text || "").toLowerCase().trim();
 
-  if (cleaned === "fanduel") return "FanDuel";
-  if (cleaned === "draftkings") return "DraftKings";
-  if (cleaned === "betmgm") return "BetMGM";
-  if (cleaned === "caesars") return "Caesars";
-  if (cleaned === "espn bet" || cleaned === "espnbet") return "ESPN Bet";
+  if (t === "fanduel") return "FanDuel";
+  if (t === "draftkings") return "DraftKings";
+  if (t === "betmgm") return "BetMGM";
+  if (t === "caesars") return "Caesars";
+  if (t.includes("espn")) return "ESPN Bet";
 
   return null;
 }
@@ -26,7 +26,6 @@ function safeParseJSON(text) {
   try {
     return JSON.parse(text);
   } catch {
-    // try to extract JSON if model added extra text
     const match = text.match(/\{[\s\S]*\}/);
     if (match) {
       try {
@@ -40,38 +39,33 @@ function safeParseJSON(text) {
 function buildSlipSummary(slip) {
   const legs = slip.legs || [];
 
-  const lines = legs.map((l, i) => {
-    return `${i + 1}. ${l.selection} — ${l.market}`;
-  });
-
   return [
-    "Slip copied.",
+    "Slip copied ✅",
     "",
-    "Legs:",
-    ...lines,
+    `${legs.length} legs detected`,
     "",
-    "Reply with your sportsbook:",
-    "FanDuel",
-    "DraftKings",
-    "BetMGM",
-    "Caesars",
-    "ESPN Bet"
+    "Choose your sportsbook:",
+    "• FanDuel",
+    "• DraftKings",
+    "• BetMGM",
+    "• Caesars",
+    "• ESPN Bet"
   ].join("\n");
 }
 
 function buildRebuildMessage(book, slip) {
   const legs = slip.legs || [];
 
-  const lines = legs.map((l, i) => {
-    return `${i + 1}. ${l.selection} — ${l.market}`;
+  const lines = legs.map((l) => {
+    return `• ${l.selection} (${l.market})`;
   });
 
   return [
-    `${book} Slip:`,
+    `🎯 ${book} Ready`,
     "",
     ...lines,
     "",
-    "Search these in the app to rebuild your bet."
+    "Paste/search these in your app to rebuild instantly."
   ].join("\n");
 }
 
@@ -80,9 +74,7 @@ async function sendMessage(id, text) {
     `https://graph.facebook.com/v18.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`,
     {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         recipient: { id },
         message: { text }
@@ -137,7 +129,7 @@ app.post("/webhook", async (req, res) => {
                   {
                     type: "input_text",
                     text:
-                      "Return ONLY valid JSON. Extract betting slip into: {bet_type, odds, stake, payout, legs:[{selection, market}]}."
+                      "Return ONLY JSON. Extract betting slip into {legs:[{selection,market}]}."
                   },
                   {
                     type: "input_image",
@@ -150,7 +142,6 @@ app.post("/webhook", async (req, res) => {
         });
 
         const data = await openai.json();
-
         const raw = data.output?.[0]?.content?.[0]?.text || "";
 
         const slip = safeParseJSON(raw);
