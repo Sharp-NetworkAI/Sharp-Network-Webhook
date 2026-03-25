@@ -88,11 +88,8 @@ app.post("/webhook", async (req, res) => {
             console.error("OpenAI error:", openaiData);
             replyText = "I couldn't read that slip image.";
           } else {
-            const rawText =
-              openaiData.output?.[0]?.content?.[0]?.text ||
-              "I couldn't extract the slip.";
-
-            replyText = rawText;
+            replyText =
+              "Slip copied.\n\nReply with your sportsbook:\nFanDuel\nDraftKings\nBetMGM\nCaesars\nESPN Bet";
           }
         } else if (text) {
           replyText = "Send me a betting slip image.";
