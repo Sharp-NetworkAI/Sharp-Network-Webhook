@@ -34,17 +34,34 @@ app.post("/webhook", async (req, res) => {
 
     for (const entry of body.entry || []) {
       for (const event of entry.messaging || []) {
-        const senderId = event.sender?.id;
-        const text = event.message?.text || null;
-        const attachments = event.message?.attachments || [];
-        const imageUrl =
-          attachments.find((a) => a.type === "image")?.payload?.url || null;
+        // Ignore delivery/read/postback/etc.
+        if (!event.message) {
+          continue;
+        }
 
+        // Ignore the bot's own echoed messages to stop loops
+        if (event.message.is_echo) {
+          continue;
+        }
+
+        const senderId = event.sender?.id;
         if (!senderId) {
           continue;
         }
 
-        let replyText = "Send me a betting slip image.";
+        const text = event.message.text || null;
+
+        let imageUrl = null;
+        if (event.message.attachments?.length) {
+          for (const att of event.message.attachments) {
+            if (att.type === "image" && att.payload?.url) {
+              imageUrl = att.payload.url;
+              break;
+            }
+          }
+        }
+
+        let replyText = null;
 
         if (imageUrl) {
           const openaiResp = await fetch("https://api.openai.com/v1/responses", {
@@ -61,8 +78,7 @@ app.post("/webhook", async (req, res) => {
                   content: [
                     {
                       type: "input_text",
-                      text:
-                        "Read this betting slip image and extract all bet legs. Return short plain text only."
+                      text: "Read this betting slip image and extract all bet legs. Return short plain text."
                     },
                     {
                       type: "input_image",
@@ -86,6 +102,11 @@ app.post("/webhook", async (req, res) => {
           }
         } else if (text) {
           replyText = "Send me a betting slip image.";
+        }
+
+        // Only send if we actually created a reply
+        if (!replyText) {
+          continue;
         }
 
         const fbResp = await fetch(
