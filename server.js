@@ -91,10 +91,8 @@ function clean(v) {
 ========================= */
 function normalizeMarketType(market = "") {
   const m = market.toLowerCase();
-
   if (m.includes("home run")) return "player_home_run";
   if (m.includes("total bases")) return "player_total_bases";
-
   return m;
 }
 
@@ -106,7 +104,7 @@ function extractLine(market = "") {
 function normalizeLeg(leg) {
   return {
     event: clean(leg.event),
-    participant: clean(leg.selection), // FIXED
+    participant: clean(leg.selection),
     marketType: normalizeMarketType(leg.market),
     line: extractLine(leg.market),
     rawMarket: leg.market
@@ -187,7 +185,32 @@ async function resolveLeg(leg) {
 }
 
 /* =========================
-   RESPONSE
+   BETSLIP BUILDER
+========================= */
+function buildBetMGMBetslip(resolvedLegs) {
+  return {
+    sportsbook: "BetMGM",
+    type: "sgp",
+    legs: resolvedLegs.map(l => ({
+      fixtureId: l.fixtureId,
+      marketId: l.marketId,
+      optionId: l.optionId
+    }))
+  };
+}
+
+function buildBetslipMessage(betslip) {
+  return [
+    "🎯 BetMGM Slip Ready",
+    "",
+    "Copy payload:",
+    "",
+    JSON.stringify(betslip, null, 2)
+  ].join("\n");
+}
+
+/* =========================
+   DEBUG
 ========================= */
 function buildDebug(resolved) {
   return resolved.map((l, i) =>
@@ -234,6 +257,7 @@ app.post("/webhook", async (req, res) => {
         if (img) imageUrl = img.payload.url;
       }
 
+      /* IMAGE */
       if (imageUrl) {
         const ai = await fetch("https://api.openai.com/v1/responses", {
           method: "POST",
@@ -280,6 +304,7 @@ app.post("/webhook", async (req, res) => {
         continue;
       }
 
+      /* BETMGM */
       if (text?.toLowerCase() === "betmgm") {
         const saved = userSlipStore[sender];
 
@@ -291,13 +316,15 @@ app.post("/webhook", async (req, res) => {
 
         userSlipStore[sender].resolved = resolved;
 
-        await sendMessage(sender, "Resolved");
+        const betslip = buildBetMGMBetslip(resolved);
+
+        await sendMessage(sender, buildBetslipMessage(betslip));
         continue;
       }
 
+      /* DEBUG */
       if (text?.toLowerCase() === "payload debug") {
         const saved = userSlipStore[sender];
-
         await sendMessage(sender, buildDebug(saved.resolved));
         continue;
       }
