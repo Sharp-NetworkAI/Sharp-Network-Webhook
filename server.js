@@ -28,14 +28,8 @@ function getMockBetMGMMkts() {
     {
       fixtureId: "MGM_REAL_FIXTURE_001",
       markets: [
-        {
-          marketId: "MGM_MARKET_HR",
-          type: "player_home_run"
-        },
-        {
-          marketId: "MGM_MARKET_TOTAL_BASES",
-          type: "player_total_bases"
-        }
+        { marketId: "MGM_MARKET_HR", type: "player_home_run" },
+        { marketId: "MGM_MARKET_TOTAL_BASES", type: "player_total_bases" }
       ]
     }
   ];
@@ -62,7 +56,7 @@ function getMockBetMGMOptions() {
       marketId: "MGM_MARKET_TOTAL_BASES",
       options: [
         {
-          optionId: "MGM_OPTION_LUIS_ARRAEZ_TOTAL_BASES_2_PLUS",
+          optionId: "MGM_OPTION_LUIS_ARRAEZ_TB",
           participant: "Luis Arraez",
           line: "2+"
         }
@@ -112,7 +106,7 @@ function extractLine(market = "") {
 function normalizeLeg(leg) {
   return {
     event: clean(leg.event),
-    participant: clean(leg.selection),
+    participant: clean(leg.selection), // FIXED
     marketType: normalizeMarketType(leg.market),
     line: extractLine(leg.market),
     rawMarket: leg.market
@@ -123,16 +117,10 @@ function normalizeLeg(leg) {
    RESOLVERS
 ========================= */
 async function searchBetMGMFixtures(leg) {
-  const events = getMockBetMGMEvents();
   const text = leg.event.toLowerCase();
 
-  for (const e of events) {
-    if (text.includes("yankees") && text.includes("giants")) {
-      return {
-        resolved: true,
-        fixtureId: e.fixtureId
-      };
-    }
+  if (text.includes("yankees") && text.includes("giants")) {
+    return { resolved: true, fixtureId: "MGM_REAL_FIXTURE_001" };
   }
 
   return { resolved: false };
@@ -140,67 +128,48 @@ async function searchBetMGMFixtures(leg) {
 
 async function searchBetMGMMarkets(fixtureId, leg) {
   const data = getMockBetMGMMkts();
-  const match = data.find((d) => d.fixtureId === fixtureId);
+  const match = data.find(d => d.fixtureId === fixtureId);
 
   if (!match) return { resolved: false };
 
-  const market = match.markets.find((m) => m.type === leg.marketType);
+  const market = match.markets.find(
+    m => m.type === leg.marketType
+  );
 
   if (!market) return { resolved: false };
 
-  return {
-    resolved: true,
-    marketId: market.marketId
-  };
+  return { resolved: true, marketId: market.marketId };
 }
 
 async function searchBetMGMOptions(fixtureId, marketId, leg) {
   const data = getMockBetMGMOptions();
+
   const match = data.find(
-    (d) => d.fixtureId === fixtureId && d.marketId === marketId
+    d => d.fixtureId === fixtureId && d.marketId === marketId
   );
 
   if (!match) return { resolved: false };
 
-  const option = match.options.find((o) => {
-    const sameParticipant =
-      o.participant.toLowerCase() === leg.participant.toLowerCase();
-
-    const sameLine =
-      !o.line || !leg.line || o.line === leg.line;
-
-    return sameParticipant && sameLine;
-  });
+  const option = match.options.find(o =>
+    o.participant.toLowerCase() === leg.participant.toLowerCase()
+  );
 
   if (!option) return { resolved: false };
 
-  return {
-    resolved: true,
-    optionId: option.optionId
-  };
+  return { resolved: true, optionId: option.optionId };
 }
 
 async function resolveLeg(leg) {
   const fixture = await searchBetMGMFixtures(leg);
 
   if (!fixture.resolved) {
-    return {
-      ...leg,
-      fixtureId: "NOT_FOUND",
-      marketId: "NOT_FOUND",
-      optionId: "NOT_FOUND"
-    };
+    return { ...leg, fixtureId: "NOT_FOUND", marketId: "NOT_FOUND", optionId: "NOT_FOUND" };
   }
 
   const market = await searchBetMGMMarkets(fixture.fixtureId, leg);
 
   if (!market.resolved) {
-    return {
-      ...leg,
-      fixtureId: fixture.fixtureId,
-      marketId: "NOT_FOUND",
-      optionId: "NOT_FOUND"
-    };
+    return { ...leg, fixtureId: fixture.fixtureId, marketId: "NOT_FOUND", optionId: "NOT_FOUND" };
   }
 
   const option = await searchBetMGMOptions(
@@ -221,14 +190,12 @@ async function resolveLeg(leg) {
    RESPONSE
 ========================= */
 function buildDebug(resolved) {
-  return resolved
-    .map((l, i) => {
-      return `${i + 1}. ${l.participant}
+  return resolved.map((l, i) =>
+`${i + 1}. ${l.participant}
 fixtureId: ${l.fixtureId}
 marketId: ${l.marketId}
-optionId: ${l.optionId}`;
-    })
-    .join("\n\n");
+optionId: ${l.optionId}`
+  ).join("\n\n");
 }
 
 /* =========================
@@ -251,18 +218,10 @@ async function sendMessage(id, text) {
 /* =========================
    ROUTES
 ========================= */
-app.get("/", (_req, res) => res.send("running"));
-
-app.get("/webhook", (req, res) => {
-  if (req.query["hub.verify_token"] === VERIFY_TOKEN) {
-    return res.send(req.query["hub.challenge"]);
-  }
-  res.sendStatus(403);
-});
-
 app.post("/webhook", async (req, res) => {
   for (const entry of req.body.entry || []) {
     for (const event of entry.messaging || []) {
+
       if (!event.message || event.message.is_echo) continue;
 
       const sender = event.sender.id;
@@ -271,11 +230,10 @@ app.post("/webhook", async (req, res) => {
       let imageUrl = null;
 
       if (event.message.attachments) {
-        const img = event.message.attachments.find((a) => a.type === "image");
+        const img = event.message.attachments.find(a => a.type === "image");
         if (img) imageUrl = img.payload.url;
       }
 
-      /* IMAGE */
       if (imageUrl) {
         const ai = await fetch("https://api.openai.com/v1/responses", {
           method: "POST",
@@ -292,7 +250,7 @@ app.post("/webhook", async (req, res) => {
                   {
                     type: "input_text",
                     text:
-                      'Return ONLY valid JSON. No explanation. No markdown. Format EXACTLY like this: {"bet_type":"","source_sportsbook":"","odds":"","stake":"","payout":"","legs":[{"event":"","market":"","selection":""}]}'
+                      'Return ONLY valid JSON. {"bet_type":"","legs":[{"event":"","market":"","selection":""}]}'
                   },
                   {
                     type: "input_image",
@@ -322,14 +280,8 @@ app.post("/webhook", async (req, res) => {
         continue;
       }
 
-      /* BETMGM */
       if (text?.toLowerCase() === "betmgm") {
         const saved = userSlipStore[sender];
-
-        if (!saved?.legs) {
-          await sendMessage(sender, "Send slip first");
-          continue;
-        }
 
         const resolved = [];
 
@@ -343,14 +295,8 @@ app.post("/webhook", async (req, res) => {
         continue;
       }
 
-      /* DEBUG */
       if (text?.toLowerCase() === "payload debug") {
         const saved = userSlipStore[sender];
-
-        if (!saved?.resolved) {
-          await sendMessage(sender, "Run BetMGM first");
-          continue;
-        }
 
         await sendMessage(sender, buildDebug(saved.resolved));
         continue;
@@ -363,6 +309,4 @@ app.post("/webhook", async (req, res) => {
   res.sendStatus(200);
 });
 
-app.listen(PORT, () => {
-  console.log("server running");
-});
+app.listen(PORT, () => console.log("running"));
