@@ -229,7 +229,7 @@ async function resolveLeg(leg) {
 }
 
 /* =========================
-   BETSLIP BUILDER
+   BETSLIP / DEEP LINK BUILDER
 ========================= */
 function buildBetMGMBetslip(resolvedLegs) {
   return {
@@ -243,14 +243,44 @@ function buildBetMGMBetslip(resolvedLegs) {
   };
 }
 
-function buildBetslipMessage(betslip) {
-  return [
+function buildBetMGMDeepLink(resolvedLegs) {
+  const validLegs = resolvedLegs.filter(
+    (l) =>
+      l.fixtureId &&
+      l.marketId &&
+      l.optionId &&
+      l.fixtureId !== "NOT_FOUND" &&
+      l.marketId !== "NOT_FOUND" &&
+      l.optionId !== "NOT_FOUND"
+  );
+
+  if (!validLegs.length) {
+    return null;
+  }
+
+  const optionsString = validLegs
+    .map((l) => `${l.fixtureId}-${l.marketId}-${l.optionId}`)
+    .join(",");
+
+  return `https://sports.betmgm.com/en/sports?options=${encodeURIComponent(optionsString)}`;
+}
+
+function buildBetslipMessage(betslip, deepLink) {
+  const lines = [
     "🎯 BetMGM Slip Ready",
     "",
     "Copy payload:",
     "",
     JSON.stringify(betslip, null, 2)
-  ].join("\n");
+  ];
+
+  if (deepLink) {
+    lines.push("", "Deep link:", "", deepLink);
+  } else {
+    lines.push("", "Deep link:", "", "Could not build link because one or more IDs were missing.");
+  }
+
+  return lines.join("\n");
 }
 
 function buildDebug(resolved) {
@@ -378,7 +408,9 @@ app.post("/webhook", async (req, res) => {
           userSlipStore[sender].resolved = resolved;
 
           const betslip = buildBetMGMBetslip(resolved);
-          await sendMessage(sender, buildBetslipMessage(betslip));
+          const deepLink = buildBetMGMDeepLink(resolved);
+
+          await sendMessage(sender, buildBetslipMessage(betslip, deepLink));
           continue;
         }
 
