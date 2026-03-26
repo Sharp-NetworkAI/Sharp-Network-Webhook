@@ -28,8 +28,14 @@ function getMockBetMGMMkts() {
     {
       fixtureId: "MGM_REAL_FIXTURE_001",
       markets: [
-        { marketId: "MGM_MARKET_HR", type: "player_home_run" },
-        { marketId: "MGM_MARKET_TOTAL_BASES", type: "player_total_bases" }
+        {
+          marketId: "MGM_MARKET_HR",
+          type: "player_home_run"
+        },
+        {
+          marketId: "MGM_MARKET_TOTAL_BASES",
+          type: "player_total_bases"
+        }
       ]
     }
   ];
@@ -90,15 +96,17 @@ function clean(v) {
    NORMALIZATION
 ========================= */
 function normalizeMarketType(market = "") {
-  const m = market.toLowerCase();
+  const m = clean(market).toLowerCase();
+
   if (m.includes("home run")) return "player_home_run";
   if (m.includes("total bases")) return "player_total_bases";
+
   return m;
 }
 
 function extractLine(market = "") {
-  const match = market.match(/(\d+)\+/);
-  return match ? match[1] + "+" : "";
+  const match = clean(market).match(/(\d+)\+/);
+  return match ? `${match[1]}+` : "";
 }
 
 function normalizeLeg(leg) {
@@ -107,7 +115,7 @@ function normalizeLeg(leg) {
     participant: clean(leg.selection),
     marketType: normalizeMarketType(leg.market),
     line: extractLine(leg.market),
-    rawMarket: leg.market
+    rawMarket: clean(leg.market)
   };
 }
 
@@ -126,13 +134,11 @@ async function searchBetMGMFixtures(leg) {
 
 async function searchBetMGMMarkets(fixtureId, leg) {
   const data = getMockBetMGMMkts();
-  const match = data.find(d => d.fixtureId === fixtureId);
+  const match = data.find((d) => d.fixtureId === fixtureId);
 
   if (!match) return { resolved: false };
 
-  const market = match.markets.find(
-    m => m.type === leg.marketType
-  );
+  const market = match.markets.find((m) => m.type === leg.marketType);
 
   if (!market) return { resolved: false };
 
@@ -143,14 +149,19 @@ async function searchBetMGMOptions(fixtureId, marketId, leg) {
   const data = getMockBetMGMOptions();
 
   const match = data.find(
-    d => d.fixtureId === fixtureId && d.marketId === marketId
+    (d) => d.fixtureId === fixtureId && d.marketId === marketId
   );
 
   if (!match) return { resolved: false };
 
-  const option = match.options.find(o =>
-    o.participant.toLowerCase() === leg.participant.toLowerCase()
-  );
+  const option = match.options.find((o) => {
+    const sameParticipant =
+      o.participant.toLowerCase() === leg.participant.toLowerCase();
+
+    const sameLine = !o.line || !leg.line || o.line === leg.line;
+
+    return sameParticipant && sameLine;
+  });
 
   if (!option) return { resolved: false };
 
@@ -161,13 +172,23 @@ async function resolveLeg(leg) {
   const fixture = await searchBetMGMFixtures(leg);
 
   if (!fixture.resolved) {
-    return { ...leg, fixtureId: "NOT_FOUND", marketId: "NOT_FOUND", optionId: "NOT_FOUND" };
+    return {
+      ...leg,
+      fixtureId: "NOT_FOUND",
+      marketId: "NOT_FOUND",
+      optionId: "NOT_FOUND"
+    };
   }
 
   const market = await searchBetMGMMarkets(fixture.fixtureId, leg);
 
   if (!market.resolved) {
-    return { ...leg, fixtureId: fixture.fixtureId, marketId: "NOT_FOUND", optionId: "NOT_FOUND" };
+    return {
+      ...leg,
+      fixtureId: fixture.fixtureId,
+      marketId: "NOT_FOUND",
+      optionId: "NOT_FOUND"
+    };
   }
 
   const option = await searchBetMGMOptions(
@@ -191,7 +212,7 @@ function buildBetMGMBetslip(resolvedLegs) {
   return {
     sportsbook: "BetMGM",
     type: "sgp",
-    legs: resolvedLegs.map(l => ({
+    legs: resolvedLegs.map((l) => ({
       fixtureId: l.fixtureId,
       marketId: l.marketId,
       optionId: l.optionId
@@ -209,16 +230,17 @@ function buildBetslipMessage(betslip) {
   ].join("\n");
 }
 
-/* =========================
-   DEBUG
-========================= */
 function buildDebug(resolved) {
-  return resolved.map((l, i) =>
-`${i + 1}. ${l.participant}
+  return resolved
+    .map(
+      (l, i) => `${i + 1}. ${l.participant}
+market: ${l.rawMarket}
+marketType: ${l.marketType}
 fixtureId: ${l.fixtureId}
 marketId: ${l.marketId}
 optionId: ${l.optionId}`
-  ).join("\n\n");
+    )
+    .join("\n\n");
 }
 
 /* =========================
@@ -241,99 +263,123 @@ async function sendMessage(id, text) {
 /* =========================
    ROUTES
 ========================= */
+app.get("/", (_req, res) => res.send("running"));
+
+app.get("/webhook", (req, res) => {
+  if (req.query["hub.verify_token"] === VERIFY_TOKEN) {
+    return res.send(req.query["hub.challenge"]);
+  }
+  res.sendStatus(403);
+});
+
 app.post("/webhook", async (req, res) => {
-  for (const entry of req.body.entry || []) {
-    for (const event of entry.messaging || []) {
+  try {
+    for (const entry of req.body.entry || []) {
+      for (const event of entry.messaging || []) {
+        if (!event.message || event.message.is_echo) continue;
 
-      if (!event.message || event.message.is_echo) continue;
+        const sender = event.sender.id;
+        const text = event.message.text;
 
-      const sender = event.sender.id;
-      const text = event.message.text;
+        let imageUrl = null;
 
-      let imageUrl = null;
+        if (event.message.attachments) {
+          const img = event.message.attachments.find((a) => a.type === "image");
+          if (img) imageUrl = img.payload.url;
+        }
 
-      if (event.message.attachments) {
-        const img = event.message.attachments.find(a => a.type === "image");
-        if (img) imageUrl = img.payload.url;
-      }
+        /* IMAGE */
+        if (imageUrl) {
+          const ai = await fetch("https://api.openai.com/v1/responses", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${OPENAI_API_KEY}`,
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+              model: "gpt-4.1-mini",
+              input: [
+                {
+                  role: "user",
+                  content: [
+                    {
+                      type: "input_text",
+                      text:
+                        'Return ONLY valid JSON. No explanation. No markdown. Format EXACTLY like this: {"bet_type":"","source_sportsbook":"","odds":"","stake":"","payout":"","legs":[{"event":"","market":"","selection":""}]}'
+                    },
+                    {
+                      type: "input_image",
+                      image_url: imageUrl
+                    }
+                  ]
+                }
+              ]
+            })
+          });
 
-      /* IMAGE */
-      if (imageUrl) {
-        const ai = await fetch("https://api.openai.com/v1/responses", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${OPENAI_API_KEY}`,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            model: "gpt-4.1-mini",
-            input: [
-              {
-                role: "user",
-                content: [
-                  {
-                    type: "input_text",
-                    text:
-                      'Return ONLY valid JSON. {"bet_type":"","legs":[{"event":"","market":"","selection":""}]}'
-                  },
-                  {
-                    type: "input_image",
-                    image_url: imageUrl
-                  }
-                ]
-              }
-            ]
-          })
-        });
+          const data = await ai.json();
+          const raw = data.output?.[0]?.content?.[0]?.text || "";
+          const parsed = safeParseJSON(raw);
 
-        const data = await ai.json();
-        const raw = data.output?.[0]?.content?.[0]?.text || "";
-        const parsed = safeParseJSON(raw);
+          if (!parsed || !Array.isArray(parsed.legs) || !parsed.legs.length) {
+            await sendMessage(sender, "parse failed");
+            continue;
+          }
 
-        if (!parsed || !parsed.legs) {
-          await sendMessage(sender, "parse failed");
+          userSlipStore[sender] = {
+            legs: parsed.legs.map(normalizeLeg),
+            resolved: null
+          };
+
+          await sendMessage(sender, "Slip copied ✅\n\nReply: BetMGM");
           continue;
         }
 
-        userSlipStore[sender] = {
-          legs: parsed.legs.map(normalizeLeg),
-          resolved: null
-        };
+        /* BETMGM */
+        if (text?.toLowerCase() === "betmgm") {
+          const saved = userSlipStore[sender];
 
-        await sendMessage(sender, "Slip copied ✅\n\nReply: BetMGM");
-        continue;
-      }
+          if (!saved?.legs) {
+            await sendMessage(sender, "Send slip first");
+            continue;
+          }
 
-      /* BETMGM */
-      if (text?.toLowerCase() === "betmgm") {
-        const saved = userSlipStore[sender];
+          const resolved = [];
 
-        const resolved = [];
+          for (const leg of saved.legs) {
+            resolved.push(await resolveLeg(leg));
+          }
 
-        for (const leg of saved.legs) {
-          resolved.push(await resolveLeg(leg));
+          userSlipStore[sender].resolved = resolved;
+
+          const betslip = buildBetMGMBetslip(resolved);
+
+          await sendMessage(sender, buildBetslipMessage(betslip));
+          continue;
         }
 
-        userSlipStore[sender].resolved = resolved;
+        /* DEBUG */
+        if (text?.toLowerCase() === "payload debug") {
+          const saved = userSlipStore[sender];
 
-        const betslip = buildBetMGMBetslip(resolved);
+          if (!saved?.resolved) {
+            await sendMessage(sender, "Run BetMGM first");
+            continue;
+          }
 
-        await sendMessage(sender, buildBetslipMessage(betslip));
-        continue;
+          await sendMessage(sender, buildDebug(saved.resolved));
+          continue;
+        }
+
+        await sendMessage(sender, "Send slip image");
       }
-
-      /* DEBUG */
-      if (text?.toLowerCase() === "payload debug") {
-        const saved = userSlipStore[sender];
-        await sendMessage(sender, buildDebug(saved.resolved));
-        continue;
-      }
-
-      await sendMessage(sender, "Send slip image");
     }
-  }
 
-  res.sendStatus(200);
+    res.sendStatus(200);
+  } catch (err) {
+    console.error(err);
+    res.sendStatus(500);
+  }
 });
 
 app.listen(PORT, () => console.log("running"));
