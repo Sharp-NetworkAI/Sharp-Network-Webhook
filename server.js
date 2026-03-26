@@ -274,8 +274,12 @@ app.get("/webhook", (req, res) => {
 
 app.post("/webhook", async (req, res) => {
   try {
-    for (const entry of req.body.entry || []) {
-      for (const event of entry.messaging || []) {
+    const entry = req.body.entry?.[0];
+    const event = entry?.messaging?.[0];
+
+    if (!event || !event.message || event.message.is_echo) {
+      return res.sendStatus(200);
+    }
         if (!event.message || event.message.is_echo) continue;
 
         const sender = event.sender.id;
