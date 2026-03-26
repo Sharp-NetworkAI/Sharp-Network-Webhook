@@ -11,7 +11,68 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const userSlipStore = {};
 
 /* =========================
-   SAFE PARSE
+   MOCK DATA
+========================= */
+function getMockBetMGMEvents() {
+  return [
+    {
+      fixtureId: "MGM_REAL_FIXTURE_001",
+      homeTeam: "San Francisco Giants",
+      awayTeam: "New York Yankees"
+    }
+  ];
+}
+
+function getMockBetMGMMkts() {
+  return [
+    {
+      fixtureId: "MGM_REAL_FIXTURE_001",
+      markets: [
+        {
+          marketId: "MGM_MARKET_HR",
+          type: "player_home_run"
+        },
+        {
+          marketId: "MGM_MARKET_TOTAL_BASES",
+          type: "player_total_bases"
+        }
+      ]
+    }
+  ];
+}
+
+function getMockBetMGMOptions() {
+  return [
+    {
+      fixtureId: "MGM_REAL_FIXTURE_001",
+      marketId: "MGM_MARKET_HR",
+      options: [
+        {
+          optionId: "MGM_OPTION_HELIOT_RAMOS_HR",
+          participant: "Heliot Ramos"
+        },
+        {
+          optionId: "MGM_OPTION_AUSTIN_WELLS_HR",
+          participant: "Austin Wells"
+        }
+      ]
+    },
+    {
+      fixtureId: "MGM_REAL_FIXTURE_001",
+      marketId: "MGM_MARKET_TOTAL_BASES",
+      options: [
+        {
+          optionId: "MGM_OPTION_LUIS_ARRAEZ_TOTAL_BASES_2_PLUS",
+          participant: "Luis Arraez",
+          line: "2+"
+        }
+      ]
+    }
+  ];
+}
+
+/* =========================
+   HELPERS
 ========================= */
 function safeParseJSON(text) {
   try {
@@ -59,33 +120,151 @@ function normalizeLeg(leg) {
 }
 
 /* =========================
-   MOCK RESOLVERS (unchanged)
+   RESOLVERS
 ========================= */
+async function searchBetMGMFixtures(leg) {
+  const text = clean(leg.event).toLowerCase();
+
+  for (const event of getMockBetMGMEvents()) {
+    const home = event.homeTeam.toLowerCase();
+    const away = event.awayTeam.toLowerCase();
+
+    if (text.includes("yankees") && text.includes("giants")) {
+      return {
+        resolved: true,
+        fixtureId: event.fixtureId
+      };
+    }
+
+    if (text.includes(home.split(" ")[0]) && text.includes(away.split(" ")[0])) {
+      return {
+        resolved: true,
+        fixtureId: event.fixtureId
+      };
+    }
+  }
+
+  return { resolved: false };
+}
+
+async function searchBetMGMMarkets(fixtureId, leg) {
+  const fixture = getMockBetMGMMkts().find((f) => f.fixtureId === fixtureId);
+
+  if (!fixture) {
+    return { resolved: false };
+  }
+
+  const market = fixture.markets.find((m) => m.type === leg.marketType);
+
+  if (!market) {
+    return { resolved: false };
+  }
+
+  return {
+    resolved: true,
+    marketId: market.marketId
+  };
+}
+
+async function searchBetMGMOptions(fixtureId, marketId, leg) {
+  const bucket = getMockBetMGMOptions().find(
+    (o) => o.fixtureId === fixtureId && o.marketId === marketId
+  );
+
+  if (!bucket) {
+    return { resolved: false };
+  }
+
+  const option = bucket.options.find((o) => {
+    const sameParticipant =
+      clean(o.participant).toLowerCase() === clean(leg.participant).toLowerCase();
+
+    const sameLine =
+      !o.line || !leg.line || clean(o.line) === clean(leg.line);
+
+    return sameParticipant && sameLine;
+  });
+
+  if (!option) {
+    return { resolved: false };
+  }
+
+  return {
+    resolved: true,
+    optionId: option.optionId
+  };
+}
+
 async function resolveLeg(leg) {
+  const fixture = await searchBetMGMFixtures(leg);
+
+  if (!fixture.resolved) {
+    return {
+      ...leg,
+      fixtureId: "NOT_FOUND",
+      marketId: "NOT_FOUND",
+      optionId: "NOT_FOUND"
+    };
+  }
+
+  const market = await searchBetMGMMarkets(fixture.fixtureId, leg);
+
+  if (!market.resolved) {
+    return {
+      ...leg,
+      fixtureId: fixture.fixtureId,
+      marketId: "NOT_FOUND",
+      optionId: "NOT_FOUND"
+    };
+  }
+
+  const option = await searchBetMGMOptions(fixture.fixtureId, market.marketId, leg);
+
   return {
     ...leg,
-    fixtureId: "MGM_REAL_FIXTURE_001",
-    marketId:
-      leg.marketType === "player_home_run"
-        ? "MGM_MARKET_HR"
-        : "MGM_MARKET_TOTAL_BASES",
-    optionId: `MGM_OPTION_${leg.participant.replace(/ /g, "_").toUpperCase()}`
+    fixtureId: fixture.fixtureId,
+    marketId: market.marketId,
+    optionId: option.resolved ? option.optionId : "NOT_FOUND"
   };
 }
 
 /* =========================
-   BUILD
+   BETSLIP BUILDER
 ========================= */
 function buildBetMGMBetslip(resolvedLegs) {
   return {
     sportsbook: "BetMGM",
     type: "sgp",
-    legs: resolvedLegs.map(l => ({
+    legs: resolvedLegs.map((l) => ({
       fixtureId: l.fixtureId,
       marketId: l.marketId,
       optionId: l.optionId
     }))
   };
+}
+
+function buildBetslipMessage(betslip) {
+  return [
+    "🎯 BetMGM Slip Ready",
+    "",
+    "Copy payload:",
+    "",
+    JSON.stringify(betslip, null, 2)
+  ].join("\n");
+}
+
+function buildDebug(resolved) {
+  return resolved
+    .map(
+      (l, i) => `${i + 1}. ${l.participant}
+market: ${l.rawMarket}
+marketType: ${l.marketType}
+line: ${l.line}
+fixtureId: ${l.fixtureId}
+marketId: ${l.marketId}
+optionId: ${l.optionId}`
+    )
+    .join("\n\n");
 }
 
 /* =========================
@@ -108,15 +287,23 @@ async function sendMessage(id, text) {
 /* =========================
    ROUTES
 ========================= */
-app.get("/", (req, res) => res.send("running"));
+app.get("/", (_req, res) => {
+  res.send("running");
+});
+
+app.get("/webhook", (req, res) => {
+  if (req.query["hub.verify_token"] === VERIFY_TOKEN) {
+    return res.send(req.query["hub.challenge"]);
+  }
+  res.sendStatus(403);
+});
 
 app.post("/webhook", async (req, res) => {
   try {
-    const entries = req.body.entry || [];
+    const entries = req.body?.entry || [];
 
     for (const entry of entries) {
       for (const event of entry.messaging || []) {
-
         if (!event.message || event.message.is_echo) continue;
 
         const sender = event.sender.id;
@@ -125,11 +312,10 @@ app.post("/webhook", async (req, res) => {
         let imageUrl = null;
 
         if (event.message.attachments) {
-          const img = event.message.attachments.find(a => a.type === "image");
+          const img = event.message.attachments.find((a) => a.type === "image");
           if (img) imageUrl = img.payload.url;
         }
 
-        /* IMAGE */
         if (imageUrl) {
           const ai = await fetch("https://api.openai.com/v1/responses", {
             method: "POST",
@@ -146,7 +332,7 @@ app.post("/webhook", async (req, res) => {
                     {
                       type: "input_text",
                       text:
-                        'Return ONLY valid JSON: {"legs":[{"event":"","market":"","selection":""}]}'
+                        'Return ONLY valid JSON. No explanation. No markdown. Format EXACTLY like this: {"bet_type":"","source_sportsbook":"","odds":"","stake":"","payout":"","legs":[{"event":"","market":"","selection":""}]}'
                     },
                     {
                       type: "input_image",
@@ -162,20 +348,20 @@ app.post("/webhook", async (req, res) => {
           const raw = data.output?.[0]?.content?.[0]?.text || "";
           const parsed = safeParseJSON(raw);
 
-          if (!parsed || !parsed.legs) {
+          if (!parsed || !Array.isArray(parsed.legs) || !parsed.legs.length) {
             await sendMessage(sender, "parse failed");
             continue;
           }
 
           userSlipStore[sender] = {
-            legs: parsed.legs.map(normalizeLeg)
+            legs: parsed.legs.map(normalizeLeg),
+            resolved: null
           };
 
-          await sendMessage(sender, "Slip copied ✅\nReply: BetMGM");
+          await sendMessage(sender, "Slip copied ✅\n\nReply: BetMGM");
           continue;
         }
 
-        /* BETMGM */
         if (text?.toLowerCase() === "betmgm") {
           const saved = userSlipStore[sender];
 
@@ -185,14 +371,26 @@ app.post("/webhook", async (req, res) => {
           }
 
           const resolved = [];
-
           for (const leg of saved.legs) {
             resolved.push(await resolveLeg(leg));
           }
 
-          const betslip = buildBetMGMBetslip(resolved);
+          userSlipStore[sender].resolved = resolved;
 
-          await sendMessage(sender, JSON.stringify(betslip, null, 2));
+          const betslip = buildBetMGMBetslip(resolved);
+          await sendMessage(sender, buildBetslipMessage(betslip));
+          continue;
+        }
+
+        if (text?.toLowerCase() === "payload debug") {
+          const saved = userSlipStore[sender];
+
+          if (!saved?.resolved) {
+            await sendMessage(sender, "Run BetMGM first");
+            continue;
+          }
+
+          await sendMessage(sender, buildDebug(saved.resolved));
           continue;
         }
 
@@ -201,11 +399,12 @@ app.post("/webhook", async (req, res) => {
     }
 
     res.sendStatus(200);
-
   } catch (err) {
     console.error(err);
     res.sendStatus(500);
   }
 });
 
-app.listen(PORT, () => console.log("running"));
+app.listen(PORT, () => {
+  console.log("running");
+});
