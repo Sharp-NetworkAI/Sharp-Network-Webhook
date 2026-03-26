@@ -112,95 +112,94 @@ app.get("/", (req, res) => res.send("running"));
 
 app.post("/webhook", async (req, res) => {
   try {
-    if (!req.body || !req.body.entry) {
-      return res.sendStatus(200);
-    }
+    const entries = req.body.entry || [];
 
-    const entry = req.body.entry[0];
-    const event = entry.messaging[0];
+    for (const entry of entries) {
+      for (const event of entry.messaging || []) {
 
-    if (!event || !event.message || event.message.is_echo) {
-      return res.sendStatus(200);
-    }
+        if (!event.message || event.message.is_echo) continue;
 
-    const sender = event.sender.id;
-    const text = event.message.text;
+        const sender = event.sender.id;
+        const text = event.message.text;
 
-    let imageUrl = null;
+        let imageUrl = null;
 
-    if (event.message.attachments) {
-      const img = event.message.attachments.find(a => a.type === "image");
-      if (img) imageUrl = img.payload.url;
-    }
+        if (event.message.attachments) {
+          const img = event.message.attachments.find(a => a.type === "image");
+          if (img) imageUrl = img.payload.url;
+        }
 
-    /* IMAGE */
-    if (imageUrl) {
-      const ai = await fetch("https://api.openai.com/v1/responses", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${OPENAI_API_KEY}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          model: "gpt-4.1-mini",
-          input: [
-            {
-              role: "user",
-              content: [
+        /* IMAGE */
+        if (imageUrl) {
+          const ai = await fetch("https://api.openai.com/v1/responses", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${OPENAI_API_KEY}`,
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+              model: "gpt-4.1-mini",
+              input: [
                 {
-                  type: "input_text",
-                  text:
-                    'Return ONLY valid JSON: {"legs":[{"event":"","market":"","selection":""}]}'
-                },
-                {
-                  type: "input_image",
-                  image_url: imageUrl
+                  role: "user",
+                  content: [
+                    {
+                      type: "input_text",
+                      text:
+                        'Return ONLY valid JSON: {"legs":[{"event":"","market":"","selection":""}]}'
+                    },
+                    {
+                      type: "input_image",
+                      image_url: imageUrl
+                    }
+                  ]
                 }
               ]
-            }
-          ]
-        })
-      });
+            })
+          });
 
-      const data = await ai.json();
-      const raw = data.output?.[0]?.content?.[0]?.text || "";
-      const parsed = safeParseJSON(raw);
+          const data = await ai.json();
+          const raw = data.output?.[0]?.content?.[0]?.text || "";
+          const parsed = safeParseJSON(raw);
 
-      if (!parsed || !parsed.legs) {
-        await sendMessage(sender, "parse failed");
-        return res.sendStatus(200);
+          if (!parsed || !parsed.legs) {
+            await sendMessage(sender, "parse failed");
+            continue;
+          }
+
+          userSlipStore[sender] = {
+            legs: parsed.legs.map(normalizeLeg)
+          };
+
+          await sendMessage(sender, "Slip copied ✅\nReply: BetMGM");
+          continue;
+        }
+
+        /* BETMGM */
+        if (text?.toLowerCase() === "betmgm") {
+          const saved = userSlipStore[sender];
+
+          if (!saved?.legs) {
+            await sendMessage(sender, "Send slip first");
+            continue;
+          }
+
+          const resolved = [];
+
+          for (const leg of saved.legs) {
+            resolved.push(await resolveLeg(leg));
+          }
+
+          const betslip = buildBetMGMBetslip(resolved);
+
+          await sendMessage(sender, JSON.stringify(betslip, null, 2));
+          continue;
+        }
+
+        await sendMessage(sender, "Send slip image");
       }
-
-      userSlipStore[sender] = {
-        legs: parsed.legs.map(normalizeLeg)
-      };
-
-      await sendMessage(sender, "Slip copied ✅\nReply: BetMGM");
-      return res.sendStatus(200);
     }
 
-    /* BETMGM */
-    if (text?.toLowerCase() === "betmgm") {
-      const saved = userSlipStore[sender];
-
-      if (!saved?.legs) {
-        await sendMessage(sender, "Send slip first");
-        return res.sendStatus(200);
-      }
-
-      const resolved = [];
-
-      for (const leg of saved.legs) {
-        resolved.push(await resolveLeg(leg));
-      }
-
-      const betslip = buildBetMGMBetslip(resolved);
-
-      await sendMessage(sender, JSON.stringify(betslip, null, 2));
-      return res.sendStatus(200);
-    }
-
-    await sendMessage(sender, "Send slip image");
     res.sendStatus(200);
 
   } catch (err) {
