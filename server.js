@@ -80,7 +80,7 @@ function safeParseJSON(text) {
 }
 
 function clean(v) {
-  return String(v || "").trim();
+  return String(v || "").replace(/\s+/g, " ").trim();
 }
 
 function slug(text) {
@@ -95,14 +95,28 @@ function teamAliasMap() {
     "new york yankees": ["new york yankees", "yankees"],
     "san francisco giants": ["san francisco giants", "giants"],
     "los angeles dodgers": ["los angeles dodgers", "dodgers"],
-    "chicago cubs": ["chicago cubs", "cubs"]
+    "chicago cubs": ["chicago cubs", "cubs"],
+    "atlanta braves": ["atlanta braves", "braves"],
+    "cincinnati reds": ["cincinnati reds", "reds"],
+    "milwaukee brewers": ["milwaukee brewers", "brewers"],
+    "st louis cardinals": ["st louis cardinals", "cardinals"],
+    "new york mets": ["new york mets", "mets"],
+    "philadelphia phillies": ["philadelphia phillies", "phillies"],
+    "boston red sox": ["boston red sox", "red sox"],
+    "baltimore orioles": ["baltimore orioles", "orioles"],
+    "cleveland guardians": ["cleveland guardians", "guardians"],
+    "minnesota twins": ["minnesota twins", "twins"],
+    "houston astros": ["houston astros", "astros"],
+    "los angeles angels": ["los angeles angels", "angels"],
+    "arizona diamondbacks": ["arizona diamondbacks", "diamondbacks"],
+    "washington nationals": ["washington nationals", "nationals"],
+    "seattle mariners": ["seattle mariners", "mariners"]
   };
 }
 
 function extractTeamsFromLegEvent(eventText) {
   const text = slug(eventText);
   const aliases = teamAliasMap();
-
   const matches = [];
 
   for (const [canonical, names] of Object.entries(aliases)) {
@@ -163,9 +177,9 @@ function extractLine(market = "") {
   return match ? `${match[1]}+` : "";
 }
 
-function normalizeLeg(leg) {
+function normalizeLeg(leg, fallbackEvent = "") {
   return {
-    event: clean(leg.event),
+    event: clean(leg.event || fallbackEvent),
     participant: clean(leg.selection),
     marketType: normalizeMarketType(leg.market),
     line: extractLine(leg.market),
@@ -174,7 +188,7 @@ function normalizeLeg(leg) {
 }
 
 /* =========================
-   LIVE FIXTURE RESOLVER (SportsGameOdds)
+   LIVE FIXTURE RESOLVER
 ========================= */
 async function fetchSportsGameOddsMLBEvents() {
   if (!SPORTSGAMEODDS_API_KEY) {
@@ -182,7 +196,7 @@ async function fetchSportsGameOddsMLBEvents() {
   }
 
   const url =
-    "https://api.sportsgameodds.com/v2/events?leagueID=MLB&oddsAvailable=true&limit=50";
+    "https://api.sportsgameodds.com/v2/events?leagueID=MLB&oddsAvailable=true&limit=100";
 
   const resp = await fetch(url, {
     headers: {
@@ -211,30 +225,38 @@ async function searchBetMGMFixtures(leg) {
   const wantedTeams = extractTeamsFromLegEvent(leg.event);
 
   if (wantedTeams.length < 2) {
-    return { resolved: false, reason: "Could not identify both teams from parsed event" };
+    return {
+      resolved: false,
+      reason: "Could not identify both teams from parsed event"
+    };
   }
 
   const sgo = await fetchSportsGameOddsMLBEvents();
 
   if (!sgo.success) {
-    return { resolved: false, reason: sgo.error || "SportsGameOdds lookup failed" };
+    return {
+      resolved: false,
+      reason: sgo.error || "SportsGameOdds lookup failed"
+    };
   }
 
   for (const eventObj of sgo.data) {
     const eventTeams = extractEventTeamsFromSportsGameOddsEvent(eventObj);
-
     const allMatched = wantedTeams.every((team) => eventTeams.includes(team));
 
     if (allMatched) {
       return {
         resolved: true,
-        fixtureId: clean(eventObj.eventID || eventObj.id || eventObj.gameID || "MGM_REAL_FIXTURE_001"),
+        fixtureId: clean(eventObj.eventID || eventObj.id || eventObj.gameID || ""),
         rawEvent: eventObj
       };
     }
   }
 
-  return { resolved: false, reason: "No live SportsGameOdds event matched parsed teams" };
+  return {
+    resolved: false,
+    reason: "No live SportsGameOdds event matched parsed teams"
+  };
 }
 
 /* =========================
@@ -377,6 +399,7 @@ function buildDebug(resolved) {
   return resolved
     .map(
       (l, i) => `${i + 1}. ${l.participant}
+event: ${l.event}
 market: ${l.rawMarket}
 marketType: ${l.marketType}
 line: ${l.line}
@@ -453,7 +476,7 @@ app.post("/webhook", async (req, res) => {
                     {
                       type: "input_text",
                       text:
-                        'Return ONLY valid JSON. No explanation. No markdown. Format EXACTLY like this: {"bet_type":"","source_sportsbook":"","odds":"","stake":"","payout":"","legs":[{"event":"","market":"","selection":""}]}'
+                        'Return ONLY valid JSON. No explanation. No markdown. Format EXACTLY like this: {"bet_type":"","source_sportsbook":"","odds":"","stake":"","payout":"","event":"","legs":[{"event":"","market":"","selection":""}]}. IMPORTANT: include the full matchup for each leg event when visible, for example "Chicago Cubs @ Cincinnati Reds". If a leg event is missing, use the top-level event field as fallback.'
                     },
                     {
                       type: "input_image",
@@ -474,8 +497,10 @@ app.post("/webhook", async (req, res) => {
             continue;
           }
 
+          const fallbackEvent = clean(parsed.event);
+
           userSlipStore[sender] = {
-            legs: parsed.legs.map(normalizeLeg),
+            legs: parsed.legs.map((leg) => normalizeLeg(leg, fallbackEvent)),
             resolved: null
           };
 
