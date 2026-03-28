@@ -45,6 +45,18 @@ function getMockBetMGMOptions() {
         {
           optionId: "MGM_OPTION_AUSTIN_WELLS_HR",
           participant: "Austin Wells"
+        },
+        {
+          optionId: "MGM_OPTION_MICHAEL_BUSCH_HR",
+          participant: "Michael Busch"
+        },
+        {
+          optionId: "MGM_OPTION_ELLY_DE_LA_CRUZ_HR",
+          participant: "Elly De La Cruz"
+        },
+        {
+          optionId: "MGM_OPTION_RONALD_ACUNA_JR_HR",
+          participant: "Ronald Acuna Jr."
         }
       ]
     },
@@ -90,6 +102,10 @@ function slug(text) {
     .replace(/\s+/g, " ");
 }
 
+function stripPitchers(eventText) {
+  return clean(eventText).replace(/\([^)]*\)/g, "").replace(/\s+/g, " ").trim();
+}
+
 function teamAliasMap() {
   return {
     "new york yankees": ["new york yankees", "yankees"],
@@ -110,12 +126,22 @@ function teamAliasMap() {
     "los angeles angels": ["los angeles angels", "angels"],
     "arizona diamondbacks": ["arizona diamondbacks", "diamondbacks"],
     "washington nationals": ["washington nationals", "nationals"],
-    "seattle mariners": ["seattle mariners", "mariners"]
+    "seattle mariners": ["seattle mariners", "mariners"],
+    "kansas city royals": ["kansas city royals", "royals"],
+    "toronto blue jays": ["toronto blue jays", "blue jays", "jays"],
+    "pittsburgh pirates": ["pittsburgh pirates", "pirates"],
+    "tampa bay rays": ["tampa bay rays", "rays"],
+    "texas rangers": ["texas rangers", "rangers"],
+    "miami marlins": ["miami marlins", "marlins"],
+    "oakland athletics": ["oakland athletics", "athletics", "as"],
+    "detroit tigers": ["detroit tigers", "tigers"],
+    "san diego padres": ["san diego padres", "padres"],
+    "colorado rockies": ["colorado rockies", "rockies"]
   };
 }
 
 function extractTeamsFromLegEvent(eventText) {
-  const text = slug(eventText);
+  const text = slug(stripPitchers(eventText));
   const aliases = teamAliasMap();
   const matches = [];
 
@@ -196,7 +222,7 @@ async function fetchSportsGameOddsMLBEvents() {
   }
 
   const url =
-    "https://api.sportsgameodds.com/v2/events?leagueID=MLB&oddsAvailable=true&limit=100";
+    "https://api.sportsgameodds.com/v2/events?leagueID=MLB&limit=200";
 
   const resp = await fetch(url, {
     headers: {
