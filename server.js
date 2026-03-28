@@ -7,22 +7,13 @@ const PORT = process.env.PORT || 3000;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "sharpnetworkbot";
 const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const SPORTSGAMEODDS_API_KEY = process.env.SPORTSGAMEODDS_API_KEY;
 
 const userSlipStore = {};
 
 /* =========================
-   MOCK DATA
+   MOCK DATA (market + option still mocked)
 ========================= */
-function getMockBetMGMEvents() {
-  return [
-    {
-      fixtureId: "MGM_REAL_FIXTURE_001",
-      homeTeam: "San Francisco Giants",
-      awayTeam: "New York Yankees"
-    }
-  ];
-}
-
 function getMockBetMGMMkts() {
   return [
     {
@@ -92,6 +83,69 @@ function clean(v) {
   return String(v || "").trim();
 }
 
+function slug(text) {
+  return clean(text)
+    .toLowerCase()
+    .replace(/[^\w\s]/g, "")
+    .replace(/\s+/g, " ");
+}
+
+function teamAliasMap() {
+  return {
+    "new york yankees": ["new york yankees", "yankees"],
+    "san francisco giants": ["san francisco giants", "giants"],
+    "los angeles dodgers": ["los angeles dodgers", "dodgers"],
+    "chicago cubs": ["chicago cubs", "cubs"]
+  };
+}
+
+function extractTeamsFromLegEvent(eventText) {
+  const text = slug(eventText);
+  const aliases = teamAliasMap();
+
+  const matches = [];
+
+  for (const [canonical, names] of Object.entries(aliases)) {
+    if (names.some((name) => text.includes(name))) {
+      matches.push(canonical);
+    }
+  }
+
+  return [...new Set(matches)];
+}
+
+function extractEventTeamsFromSportsGameOddsEvent(eventObj) {
+  const candidates = [
+    eventObj.homeTeamName,
+    eventObj.awayTeamName,
+    eventObj.homeTeam?.displayName,
+    eventObj.awayTeam?.displayName,
+    eventObj.homeTeam?.name,
+    eventObj.awayTeam?.name,
+    eventObj.teams?.[0]?.displayName,
+    eventObj.teams?.[1]?.displayName,
+    eventObj.teams?.[0]?.name,
+    eventObj.teams?.[1]?.name,
+    eventObj.name,
+    eventObj.displayName
+  ].filter(Boolean);
+
+  const aliases = teamAliasMap();
+  const found = [];
+
+  for (const candidate of candidates) {
+    const c = slug(candidate);
+
+    for (const [canonical, names] of Object.entries(aliases)) {
+      if (names.some((name) => c.includes(name))) {
+        found.push(canonical);
+      }
+    }
+  }
+
+  return [...new Set(found)];
+}
+
 /* =========================
    NORMALIZATION
 ========================= */
@@ -120,56 +174,89 @@ function normalizeLeg(leg) {
 }
 
 /* =========================
-   RESOLVERS
+   LIVE FIXTURE RESOLVER (SportsGameOdds)
 ========================= */
-async function searchBetMGMFixtures(leg) {
-  const text = clean(leg.event).toLowerCase();
-
-  for (const event of getMockBetMGMEvents()) {
-    const home = event.homeTeam.toLowerCase();
-    const away = event.awayTeam.toLowerCase();
-
-    if (text.includes("yankees") && text.includes("giants")) {
-      return {
-        resolved: true,
-        fixtureId: event.fixtureId
-      };
-    }
-
-    if (text.includes(home.split(" ")[0]) && text.includes(away.split(" ")[0])) {
-      return {
-        resolved: true,
-        fixtureId: event.fixtureId
-      };
-    }
+async function fetchSportsGameOddsMLBEvents() {
+  if (!SPORTSGAMEODDS_API_KEY) {
+    return { success: false, error: "SPORTSGAMEODDS_API_KEY missing", data: [] };
   }
 
-  return { resolved: false };
-}
+  const url =
+    "https://api.sportsgameodds.com/v2/events?leagueID=MLB&oddsAvailable=true&limit=50";
 
-async function searchBetMGMMarkets(fixtureId, leg) {
-  const fixture = getMockBetMGMMkts().find((f) => f.fixtureId === fixtureId);
+  const resp = await fetch(url, {
+    headers: {
+      "x-api-key": SPORTSGAMEODDS_API_KEY
+    }
+  });
 
-  if (!fixture) {
-    return { resolved: false };
-  }
+  const data = await resp.json().catch(() => ({}));
 
-  const market = fixture.markets.find((m) => m.type === leg.marketType);
-
-  if (!market) {
-    return { resolved: false };
+  if (!resp.ok) {
+    return {
+      success: false,
+      error: data?.error || `SportsGameOdds HTTP ${resp.status}`,
+      data: []
+    };
   }
 
   return {
-    resolved: true,
-    marketId: market.marketId
+    success: data?.success !== false,
+    error: data?.error || null,
+    data: Array.isArray(data?.data) ? data.data : []
   };
 }
 
+async function searchBetMGMFixtures(leg) {
+  const wantedTeams = extractTeamsFromLegEvent(leg.event);
+
+  if (wantedTeams.length < 2) {
+    return { resolved: false, reason: "Could not identify both teams from parsed event" };
+  }
+
+  const sgo = await fetchSportsGameOddsMLBEvents();
+
+  if (!sgo.success) {
+    return { resolved: false, reason: sgo.error || "SportsGameOdds lookup failed" };
+  }
+
+  for (const eventObj of sgo.data) {
+    const eventTeams = extractEventTeamsFromSportsGameOddsEvent(eventObj);
+
+    const allMatched = wantedTeams.every((team) => eventTeams.includes(team));
+
+    if (allMatched) {
+      return {
+        resolved: true,
+        fixtureId: clean(eventObj.eventID || eventObj.id || eventObj.gameID || "MGM_REAL_FIXTURE_001"),
+        rawEvent: eventObj
+      };
+    }
+  }
+
+  return { resolved: false, reason: "No live SportsGameOdds event matched parsed teams" };
+}
+
+/* =========================
+   MOCK MARKET + OPTION RESOLVERS
+========================= */
+async function searchBetMGMMarkets(fixtureId, leg) {
+  const marketTable = {
+    player_home_run: "MGM_MARKET_HR",
+    player_total_bases: "MGM_MARKET_TOTAL_BASES"
+  };
+
+  const marketId = marketTable[leg.marketType];
+
+  if (!marketId) {
+    return { resolved: false };
+  }
+
+  return { resolved: true, marketId };
+}
+
 async function searchBetMGMOptions(fixtureId, marketId, leg) {
-  const bucket = getMockBetMGMOptions().find(
-    (o) => o.fixtureId === fixtureId && o.marketId === marketId
-  );
+  const bucket = getMockBetMGMOptions().find((o) => o.marketId === marketId);
 
   if (!bucket) {
     return { resolved: false };
@@ -203,7 +290,8 @@ async function resolveLeg(leg) {
       ...leg,
       fixtureId: "NOT_FOUND",
       marketId: "NOT_FOUND",
-      optionId: "NOT_FOUND"
+      optionId: "NOT_FOUND",
+      resolverNote: fixture.reason || "Fixture not found"
     };
   }
 
@@ -214,7 +302,8 @@ async function resolveLeg(leg) {
       ...leg,
       fixtureId: fixture.fixtureId,
       marketId: "NOT_FOUND",
-      optionId: "NOT_FOUND"
+      optionId: "NOT_FOUND",
+      resolverNote: "Market not found"
     };
   }
 
@@ -224,7 +313,8 @@ async function resolveLeg(leg) {
     ...leg,
     fixtureId: fixture.fixtureId,
     marketId: market.marketId,
-    optionId: option.resolved ? option.optionId : "NOT_FOUND"
+    optionId: option.resolved ? option.optionId : "NOT_FOUND",
+    resolverNote: option.resolved ? "" : "Option not found"
   };
 }
 
@@ -292,7 +382,8 @@ marketType: ${l.marketType}
 line: ${l.line}
 fixtureId: ${l.fixtureId}
 marketId: ${l.marketId}
-optionId: ${l.optionId}`
+optionId: ${l.optionId}
+resolverNote: ${l.resolverNote || ""}`
     )
     .join("\n\n");
 }
