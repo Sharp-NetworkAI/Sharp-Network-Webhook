@@ -199,7 +199,7 @@ async function fetchSportsGameOddsMLBEvents() {
     return { success: false, error: "SPORTSGAMEODDS_API_KEY missing", data: [] };
   }
 
-  const url = "https://api.sportsgameodds.com/v2/events?leagueID=MLB&limit=50";
+  const url = "https://api.sportsgameodds.com/v2/events?leagueID=MLB&limit=10";
 
   const resp = await fetch(url, {
     headers: {
@@ -402,27 +402,19 @@ async function buildSgoDebugMessage() {
     return `SGO debug failed\n\n${sgo.error || "Unknown error"}`;
   }
 
-  const sample = sgo.data.slice(0, 3).map((eventObj, i) => {
-    const teams = extractEventTeamsFromSportsGameOddsEvent(eventObj);
-    const eventId = clean(eventObj.eventID || eventObj.id || eventObj.gameID || "none");
-    const display =
-      clean(
-        eventObj.name ||
-        eventObj.displayName ||
-        `${eventObj.awayTeamName || ""} @ ${eventObj.homeTeamName || ""}`
-      ) || "no display";
-
-    return `${i + 1}. eventId: ${eventId}
-display: ${display}
-teams: ${teams.join(" | ") || "none"}`;
-  });
+  const first = sgo.data[0];
+  if (!first) {
+    return "SGO debug\n\nNo events returned.";
+  }
 
   return [
     "SGO debug",
     "",
     `eventCount: ${sgo.data.length}`,
     "",
-    ...sample
+    "First raw event:",
+    "",
+    JSON.stringify(first, null, 2).slice(0, 2500)
   ].join("\n");
 }
 
@@ -476,7 +468,6 @@ app.post("/webhook", async (req, res) => {
 
         if (text?.toLowerCase() === "sgo debug") {
           const msg = await buildSgoDebugMessage();
-          console.log("sending sgo debug");
           await sendMessage(sender, msg);
           continue;
         }
