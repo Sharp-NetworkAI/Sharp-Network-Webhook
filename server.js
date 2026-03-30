@@ -117,6 +117,19 @@ function teamAliasMap() {
   };
 }
 
+function canonicalizeTeamName(text) {
+  const s = slug(text);
+  const aliases = teamAliasMap();
+
+  for (const [canonical, names] of Object.entries(aliases)) {
+    if (names.some((name) => s.includes(slug(name)))) {
+      return canonical;
+    }
+  }
+
+  return "";
+}
+
 function extractTeamsFromLegEvent(eventText) {
   const text = slug(stripPitchers(eventText));
   const aliases = teamAliasMap();
@@ -132,7 +145,12 @@ function extractTeamsFromLegEvent(eventText) {
 }
 
 function extractEventTeamsFromSportsGameOddsEvent(eventObj) {
-  const candidates = [
+  const candidates = [];
+
+  if (eventObj?.teams?.home) candidates.push(eventObj.teams.home);
+  if (eventObj?.teams?.away) candidates.push(eventObj.teams.away);
+
+  candidates.push(
     eventObj.homeTeamName,
     eventObj.awayTeamName,
     eventObj.homeTeam?.displayName,
@@ -145,19 +163,13 @@ function extractEventTeamsFromSportsGameOddsEvent(eventObj) {
     eventObj.teams?.[1]?.name,
     eventObj.name,
     eventObj.displayName
-  ].filter(Boolean);
+  );
 
-  const aliases = teamAliasMap();
   const found = [];
 
-  for (const candidate of candidates) {
-    const c = slug(candidate);
-
-    for (const [canonical, names] of Object.entries(aliases)) {
-      if (names.some((name) => c.includes(slug(name)))) {
-        found.push(canonical);
-      }
-    }
+  for (const candidate of candidates.filter(Boolean)) {
+    const canonical = canonicalizeTeamName(candidate);
+    if (canonical) found.push(canonical);
   }
 
   return [...new Set(found)];
@@ -415,7 +427,9 @@ function buildSgoDebugMessage(eventObj, count) {
     `name=${clean(eventObj?.name)}`,
     `displayName=${clean(eventObj?.displayName)}`,
     `homeTeamName=${clean(eventObj?.homeTeamName)}`,
-    `awayTeamName=${clean(eventObj?.awayTeamName)}`
+    `awayTeamName=${clean(eventObj?.awayTeamName)}`,
+    `teams.home=${clean(eventObj?.teams?.home)}`,
+    `teams.away=${clean(eventObj?.teams?.away)}`
   ].join("\n");
 
   return [
@@ -490,7 +504,7 @@ app.post("/webhook", async (req, res) => {
 
           const first = sgo.data[0] || {};
           const msg = buildSgoDebugMessage(first, sgo.data.length);
-          console.log("sending sgo debug with topKeys");
+          console.log("sending sgo debug with teams.home/away");
           await sendMessage(sender, msg);
           continue;
         }
