@@ -395,34 +395,41 @@ resolverNote: ${l.resolverNote || ""}`
     .join("\n\n");
 }
 
-async function buildSgoDebugMessage() {
-  const sgo = await fetchSportsGameOddsMLBEvents();
+function buildSgoDebugMessage(eventObj, count) {
+  const topKeys = Object.keys(eventObj || {});
+  const nestedSummaries = [];
 
-  if (!sgo.success) {
-    return `SGO debug failed\n${sgo.error || "Unknown error"}`;
+  for (const key of topKeys.slice(0, 12)) {
+    const value = eventObj[key];
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      nestedSummaries.push(`${key}: {${Object.keys(value).slice(0, 8).join(", ")}}`);
+    } else if (Array.isArray(value)) {
+      nestedSummaries.push(`${key}: [len=${value.length}]`);
+    }
   }
 
-  const lines = [
+  const sampleValues = [
+    `eventID=${clean(eventObj?.eventID)}`,
+    `id=${clean(eventObj?.id)}`,
+    `gameID=${clean(eventObj?.gameID)}`,
+    `name=${clean(eventObj?.name)}`,
+    `displayName=${clean(eventObj?.displayName)}`,
+    `homeTeamName=${clean(eventObj?.homeTeamName)}`,
+    `awayTeamName=${clean(eventObj?.awayTeamName)}`
+  ].join("\n");
+
+  return [
     "SGO debug",
-    `eventCount: ${sgo.data.length}`
-  ];
-
-  for (let i = 0; i < Math.min(3, sgo.data.length); i++) {
-    const e = sgo.data[i];
-    const eventId = clean(e.eventID || e.id || e.gameID || "none");
-    const display = clean(
-      e.name ||
-      e.displayName ||
-      `${e.awayTeamName || ""} @ ${e.homeTeamName || ""}`
-    ) || "no display";
-    const teams = extractEventTeamsFromSportsGameOddsEvent(e).join(" | ") || "none";
-
-    lines.push(`${i + 1}. ${eventId}`);
-    lines.push(`display: ${display}`);
-    lines.push(`teams: ${teams}`);
-  }
-
-  return lines.join("\n");
+    `eventCount: ${count}`,
+    "",
+    `topKeys: ${topKeys.join(", ") || "none"}`,
+    "",
+    "sampleValues:",
+    sampleValues,
+    "",
+    "nested:",
+    nestedSummaries.join("\n") || "none"
+  ].join("\n").slice(0, 1900);
 }
 
 /* =========================
@@ -474,8 +481,16 @@ app.post("/webhook", async (req, res) => {
         console.log("incoming text:", text || "[no text]");
 
         if (text?.toLowerCase() === "sgo debug") {
-          const msg = await buildSgoDebugMessage();
-          console.log("sending sgo debug short");
+          const sgo = await fetchSportsGameOddsMLBEvents();
+
+          if (!sgo.success) {
+            await sendMessage(sender, `SGO debug failed\n${sgo.error || "Unknown error"}`);
+            continue;
+          }
+
+          const first = sgo.data[0] || {};
+          const msg = buildSgoDebugMessage(first, sgo.data.length);
+          console.log("sending sgo debug with topKeys");
           await sendMessage(sender, msg);
           continue;
         }
