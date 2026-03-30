@@ -86,9 +86,9 @@ function teamAliasMap() {
   return {
     "new york yankees": ["new york yankees", "yankees"],
     "san francisco giants": ["san francisco giants", "giants"],
-    "los angeles dodgers": ["los angeles dodgers", "dodgers"],
+    "los angeles dodgers": ["los angeles dodgers", "dodgers", "lad"],
     "chicago cubs": ["chicago cubs", "cubs"],
-    "atlanta braves": ["atlanta braves", "braves"],
+    "atlanta braves": ["atlanta braves", "braves", "atl"],
     "cincinnati reds": ["cincinnati reds", "reds"],
     "milwaukee brewers": ["milwaukee brewers", "brewers"],
     "st louis cardinals": ["st louis cardinals", "cardinals"],
@@ -111,7 +111,7 @@ function teamAliasMap() {
     "miami marlins": ["miami marlins", "marlins"],
     "oakland athletics": ["oakland athletics", "athletics", "as", "a s"],
     "detroit tigers": ["detroit tigers", "tigers"],
-    "san diego padres": ["san diego padres", "padres"],
+    "san diego padres": ["san diego padres", "padres", "sd"],
     "colorado rockies": ["colorado rockies", "rockies"],
     "chicago white sox": ["chicago white sox", "white sox"]
   };
@@ -149,21 +149,13 @@ function getNameCandidatesFromTeamObject(teamObj) {
 
   const namesObj = teamObj.names || {};
   const candidates = [
+    namesObj.short,
+    namesObj.medium,
+    namesObj.long,
     teamObj.name,
     teamObj.displayName,
     teamObj.fullName,
-    teamObj.abbreviation,
-    namesObj.name,
-    namesObj.displayName,
-    namesObj.fullName,
-    namesObj.shortName,
-    namesObj.mediumName,
-    namesObj.longName,
-    namesObj.abbreviation,
-    namesObj.nickName,
-    namesObj.location,
-    namesObj.city,
-    namesObj.teamName
+    teamObj.abbreviation
   ];
 
   for (const value of Object.values(namesObj)) {
@@ -179,24 +171,9 @@ function extractEventTeamsFromSportsGameOddsEvent(eventObj) {
   candidates.push(...getNameCandidatesFromTeamObject(eventObj?.teams?.home));
   candidates.push(...getNameCandidatesFromTeamObject(eventObj?.teams?.away));
 
-  candidates.push(
-    eventObj.homeTeamName,
-    eventObj.awayTeamName,
-    eventObj.homeTeam?.displayName,
-    eventObj.awayTeam?.displayName,
-    eventObj.homeTeam?.name,
-    eventObj.awayTeam?.name,
-    eventObj.teams?.[0]?.displayName,
-    eventObj.teams?.[1]?.displayName,
-    eventObj.teams?.[0]?.name,
-    eventObj.teams?.[1]?.name,
-    eventObj.name,
-    eventObj.displayName
-  );
-
   const found = [];
 
-  for (const candidate of candidates.filter(Boolean)) {
+  for (const candidate of candidates) {
     const canonical = canonicalizeTeamName(candidate);
     if (canonical) found.push(canonical);
   }
@@ -291,7 +268,7 @@ async function searchBetMGMFixtures(leg) {
     if (allMatched) {
       return {
         resolved: true,
-        fixtureId: clean(eventObj.eventID || eventObj.id || eventObj.gameID || ""),
+        fixtureId: clean(eventObj.eventID || ""),
         rawEvent: eventObj
       };
     }
@@ -436,27 +413,6 @@ resolverNote: ${l.resolverNote || ""}`
     .join("\n\n");
 }
 
-function buildSgoDebugMessage(eventObj, count) {
-  const homeNames = eventObj?.teams?.home?.names || {};
-  const awayNames = eventObj?.teams?.away?.names || {};
-
-  const sampleValues = [
-    `eventID=${clean(eventObj?.eventID)}`,
-    `home names keys=${Object.keys(homeNames).join(", ") || "none"}`,
-    `away names keys=${Object.keys(awayNames).join(", ") || "none"}`,
-    `home names values=${Object.values(homeNames).filter(v => typeof v === "string").join(" | ") || "none"}`,
-    `away names values=${Object.values(awayNames).filter(v => typeof v === "string").join(" | ") || "none"}`
-  ].join("\n");
-
-  return [
-    "SGO debug",
-    `eventCount: ${count}`,
-    "",
-    "sampleValues:",
-    sampleValues
-  ].join("\n").slice(0, 1900);
-}
-
 /* =========================
    SEND
 ========================= */
@@ -503,22 +459,6 @@ app.post("/webhook", async (req, res) => {
 
         const sender = event.sender.id;
         const text = event.message.text;
-        console.log("incoming text:", text || "[no text]");
-
-        if (text?.toLowerCase() === "sgo debug") {
-          const sgo = await fetchSportsGameOddsMLBEvents();
-
-          if (!sgo.success) {
-            await sendMessage(sender, `SGO debug failed\n${sgo.error || "Unknown error"}`);
-            continue;
-          }
-
-          const first = sgo.data[0] || {};
-          const msg = buildSgoDebugMessage(first, sgo.data.length);
-          console.log("sending sgo debug with names values");
-          await sendMessage(sender, msg);
-          continue;
-        }
 
         let imageUrl = null;
         if (event.message.attachments) {
@@ -605,6 +545,23 @@ app.post("/webhook", async (req, res) => {
           }
 
           await sendMessage(sender, buildDebug(saved.resolved));
+          continue;
+        }
+
+        if (text?.toLowerCase() === "sgo debug") {
+          const sgo = await fetchSportsGameOddsMLBEvents();
+          const first = sgo.data?.[0] || {};
+          const homeNames = Object.values(first?.teams?.home?.names || {}).join(" | ") || "none";
+          const awayNames = Object.values(first?.teams?.away?.names || {}).join(" | ") || "none";
+
+          await sendMessage(
+            sender,
+            `SGO debug
+eventCount: ${sgo.data?.length || 0}
+
+home names: ${homeNames}
+away names: ${awayNames}`
+          );
           continue;
         }
 
