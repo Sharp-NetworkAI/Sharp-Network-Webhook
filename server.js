@@ -413,6 +413,29 @@ resolverNote: ${l.resolverNote || ""}`
     .join("\n\n");
 }
 
+async function buildSgoLinesMessage() {
+  const sgo = await fetchSportsGameOddsMLBEvents();
+
+  if (!sgo.success) {
+    return `SGO lines failed\n${sgo.error || "Unknown error"}`;
+  }
+
+  const lines = ["SGO lines", `eventCount: ${sgo.data.length}`, ""];
+
+  for (const eventObj of sgo.data.slice(0, 10)) {
+    const fixtureId = clean(eventObj.eventID || "");
+    const homeNames = getNameCandidatesFromTeamObject(eventObj?.teams?.home);
+    const awayNames = getNameCandidatesFromTeamObject(eventObj?.teams?.away);
+
+    lines.push(`fixtureId: ${fixtureId}`);
+    lines.push(`home: ${homeNames.join(" | ") || "none"}`);
+    lines.push(`away: ${awayNames.join(" | ") || "none"}`);
+    lines.push("");
+  }
+
+  return lines.join("\n").slice(0, 1900);
+}
+
 /* =========================
    SEND
 ========================= */
@@ -548,20 +571,9 @@ app.post("/webhook", async (req, res) => {
           continue;
         }
 
-        if (text?.toLowerCase() === "sgo debug") {
-          const sgo = await fetchSportsGameOddsMLBEvents();
-          const first = sgo.data?.[0] || {};
-          const homeNames = Object.values(first?.teams?.home?.names || {}).join(" | ") || "none";
-          const awayNames = Object.values(first?.teams?.away?.names || {}).join(" | ") || "none";
-
-          await sendMessage(
-            sender,
-            `SGO debug
-eventCount: ${sgo.data?.length || 0}
-
-home names: ${homeNames}
-away names: ${awayNames}`
-          );
+        if (text?.toLowerCase() === "sgo lines") {
+          const msg = await buildSgoLinesMessage();
+          await sendMessage(sender, msg);
           continue;
         }
 
