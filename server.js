@@ -19,14 +19,8 @@ function getMockBetMGMMkts() {
     {
       fixtureId: "MGM_REAL_FIXTURE_001",
       markets: [
-        {
-          marketId: "MGM_MARKET_HR",
-          type: "player_home_run"
-        },
-        {
-          marketId: "MGM_MARKET_TOTAL_BASES",
-          type: "player_total_bases"
-        }
+        { marketId: "MGM_MARKET_HR", type: "player_home_run" },
+        { marketId: "MGM_MARKET_TOTAL_BASES", type: "player_total_bases" }
       ]
     }
   ];
@@ -38,26 +32,11 @@ function getMockBetMGMOptions() {
       fixtureId: "MGM_REAL_FIXTURE_001",
       marketId: "MGM_MARKET_HR",
       options: [
-        {
-          optionId: "MGM_OPTION_HELIOT_RAMOS_HR",
-          participant: "Heliot Ramos"
-        },
-        {
-          optionId: "MGM_OPTION_AUSTIN_WELLS_HR",
-          participant: "Austin Wells"
-        },
-        {
-          optionId: "MGM_OPTION_MICHAEL_BUSCH_HR",
-          participant: "Michael Busch"
-        },
-        {
-          optionId: "MGM_OPTION_ELLY_DE_LA_CRUZ_HR",
-          participant: "Elly De La Cruz"
-        },
-        {
-          optionId: "MGM_OPTION_RONALD_ACUNA_JR_HR",
-          participant: "Ronald Acuna Jr."
-        }
+        { optionId: "MGM_OPTION_HELIOT_RAMOS_HR", participant: "Heliot Ramos" },
+        { optionId: "MGM_OPTION_AUSTIN_WELLS_HR", participant: "Austin Wells" },
+        { optionId: "MGM_OPTION_MICHAEL_BUSCH_HR", participant: "Michael Busch" },
+        { optionId: "MGM_OPTION_ELLY_DE_LA_CRUZ_HR", participant: "Elly De La Cruz" },
+        { optionId: "MGM_OPTION_RONALD_ACUNA_JR_HR", participant: "Ronald Acuna Jr." }
       ]
     },
     {
@@ -98,12 +77,13 @@ function clean(v) {
 function slug(text) {
   return clean(text)
     .toLowerCase()
-    .replace(/[^\w\s]/g, "")
-    .replace(/\s+/g, " ");
+    .replace(/[^\w\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function stripPitchers(eventText) {
-  return clean(eventText).replace(/\([^)]*\)/g, "").replace(/\s+/g, " ").trim();
+  return clean(eventText).replace(/\([^)]*\)/g, " ").replace(/\s+/g, " ").trim();
 }
 
 function teamAliasMap() {
@@ -124,8 +104,8 @@ function teamAliasMap() {
     "minnesota twins": ["minnesota twins", "twins"],
     "houston astros": ["houston astros", "astros"],
     "los angeles angels": ["los angeles angels", "angels"],
-    "arizona diamondbacks": ["arizona diamondbacks", "diamondbacks"],
-    "washington nationals": ["washington nationals", "nationals"],
+    "arizona diamondbacks": ["arizona diamondbacks", "diamondbacks", "dbacks"],
+    "washington nationals": ["washington nationals", "nationals", "nats"],
     "seattle mariners": ["seattle mariners", "mariners"],
     "kansas city royals": ["kansas city royals", "royals"],
     "toronto blue jays": ["toronto blue jays", "blue jays", "jays"],
@@ -133,10 +113,12 @@ function teamAliasMap() {
     "tampa bay rays": ["tampa bay rays", "rays"],
     "texas rangers": ["texas rangers", "rangers"],
     "miami marlins": ["miami marlins", "marlins"],
-    "oakland athletics": ["oakland athletics", "athletics", "as"],
+    "oakland athletics": ["oakland athletics", "athletics", "as", "a s"],
     "detroit tigers": ["detroit tigers", "tigers"],
     "san diego padres": ["san diego padres", "padres"],
-    "colorado rockies": ["colorado rockies", "rockies"]
+    "colorado rockies": ["colorado rockies", "rockies"],
+    "chicago white sox": ["chicago white sox", "white sox"],
+    "los angeles angels": ["los angeles angels", "angels"]
   };
 }
 
@@ -146,7 +128,7 @@ function extractTeamsFromLegEvent(eventText) {
   const matches = [];
 
   for (const [canonical, names] of Object.entries(aliases)) {
-    if (names.some((name) => text.includes(name))) {
+    if (names.some((name) => text.includes(slug(name)))) {
       matches.push(canonical);
     }
   }
@@ -177,13 +159,21 @@ function extractEventTeamsFromSportsGameOddsEvent(eventObj) {
     const c = slug(candidate);
 
     for (const [canonical, names] of Object.entries(aliases)) {
-      if (names.some((name) => c.includes(name))) {
+      if (names.some((name) => c.includes(slug(name)))) {
         found.push(canonical);
       }
     }
   }
 
   return [...new Set(found)];
+}
+
+function overlapScore(wantedTeams, eventTeams) {
+  let score = 0;
+  for (const team of wantedTeams) {
+    if (eventTeams.includes(team)) score += 1;
+  }
+  return score;
 }
 
 /* =========================
@@ -221,8 +211,7 @@ async function fetchSportsGameOddsMLBEvents() {
     return { success: false, error: "SPORTSGAMEODDS_API_KEY missing", data: [] };
   }
 
-  const url =
-    "https://api.sportsgameodds.com/v2/events?leagueID=MLB&limit=200";
+  const url = "https://api.sportsgameodds.com/v2/events?leagueID=MLB&limit=200";
 
   const resp = await fetch(url, {
     headers: {
@@ -266,17 +255,32 @@ async function searchBetMGMFixtures(leg) {
     };
   }
 
+  let bestMatch = null;
+  let bestScore = 0;
+
   for (const eventObj of sgo.data) {
     const eventTeams = extractEventTeamsFromSportsGameOddsEvent(eventObj);
-    const allMatched = wantedTeams.every((team) => eventTeams.includes(team));
+    const score = overlapScore(wantedTeams, eventTeams);
 
-    if (allMatched) {
+    if (score > bestScore) {
+      bestScore = score;
+      bestMatch = eventObj;
+    }
+
+    if (score >= 2) {
       return {
         resolved: true,
         fixtureId: clean(eventObj.eventID || eventObj.id || eventObj.gameID || ""),
         rawEvent: eventObj
       };
     }
+  }
+
+  if (bestMatch && bestScore === 1) {
+    return {
+      resolved: false,
+      reason: "Only one team matched a live SportsGameOdds event"
+    };
   }
 
   return {
