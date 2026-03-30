@@ -144,11 +144,40 @@ function extractTeamsFromLegEvent(eventText) {
   return [...new Set(matches)];
 }
 
+function getNameCandidatesFromTeamObject(teamObj) {
+  if (!teamObj || typeof teamObj !== "object") return [];
+
+  const namesObj = teamObj.names || {};
+  const candidates = [
+    teamObj.name,
+    teamObj.displayName,
+    teamObj.fullName,
+    teamObj.abbreviation,
+    namesObj.name,
+    namesObj.displayName,
+    namesObj.fullName,
+    namesObj.shortName,
+    namesObj.mediumName,
+    namesObj.longName,
+    namesObj.abbreviation,
+    namesObj.nickName,
+    namesObj.location,
+    namesObj.city,
+    namesObj.teamName
+  ];
+
+  for (const value of Object.values(namesObj)) {
+    if (typeof value === "string") candidates.push(value);
+  }
+
+  return candidates.filter(Boolean);
+}
+
 function extractEventTeamsFromSportsGameOddsEvent(eventObj) {
   const candidates = [];
 
-  if (eventObj?.teams?.home && typeof eventObj.teams.home === "string") candidates.push(eventObj.teams.home);
-  if (eventObj?.teams?.away && typeof eventObj.teams.away === "string") candidates.push(eventObj.teams.away);
+  candidates.push(...getNameCandidatesFromTeamObject(eventObj?.teams?.home));
+  candidates.push(...getNameCandidatesFromTeamObject(eventObj?.teams?.away));
 
   candidates.push(
     eventObj.homeTeamName,
@@ -408,29 +437,20 @@ resolverNote: ${l.resolverNote || ""}`
 }
 
 function buildSgoDebugMessage(eventObj, count) {
-  const topKeys = Object.keys(eventObj || {});
-  const homeKeys = Object.keys(eventObj?.teams?.home || {});
-  const awayKeys = Object.keys(eventObj?.teams?.away || {});
+  const homeNames = eventObj?.teams?.home?.names || {};
+  const awayNames = eventObj?.teams?.away?.names || {};
 
   const sampleValues = [
     `eventID=${clean(eventObj?.eventID)}`,
-    `teams.home keys=${homeKeys.join(", ") || "none"}`,
-    `teams.away keys=${awayKeys.join(", ") || "none"}`,
-    `teams.home.name=${clean(eventObj?.teams?.home?.name)}`,
-    `teams.home.displayName=${clean(eventObj?.teams?.home?.displayName)}`,
-    `teams.home.abbreviation=${clean(eventObj?.teams?.home?.abbreviation)}`,
-    `teams.home.fullName=${clean(eventObj?.teams?.home?.fullName)}`,
-    `teams.away.name=${clean(eventObj?.teams?.away?.name)}`,
-    `teams.away.displayName=${clean(eventObj?.teams?.away?.displayName)}`,
-    `teams.away.abbreviation=${clean(eventObj?.teams?.away?.abbreviation)}`,
-    `teams.away.fullName=${clean(eventObj?.teams?.away?.fullName)}`
+    `home names keys=${Object.keys(homeNames).join(", ") || "none"}`,
+    `away names keys=${Object.keys(awayNames).join(", ") || "none"}`,
+    `home names values=${Object.values(homeNames).filter(v => typeof v === "string").join(" | ") || "none"}`,
+    `away names values=${Object.values(awayNames).filter(v => typeof v === "string").join(" | ") || "none"}`
   ].join("\n");
 
   return [
     "SGO debug",
     `eventCount: ${count}`,
-    "",
-    `topKeys: ${topKeys.join(", ") || "none"}`,
     "",
     "sampleValues:",
     sampleValues
@@ -495,7 +515,7 @@ app.post("/webhook", async (req, res) => {
 
           const first = sgo.data[0] || {};
           const msg = buildSgoDebugMessage(first, sgo.data.length);
-          console.log("sending sgo debug with home/away keys");
+          console.log("sending sgo debug with names values");
           await sendMessage(sender, msg);
           continue;
         }
