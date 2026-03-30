@@ -20,7 +20,8 @@ function getMockBetMGMMkts() {
       fixtureId: "MGM_REAL_FIXTURE_001",
       markets: [
         { marketId: "MGM_MARKET_HR", type: "player_home_run" },
-        { marketId: "MGM_MARKET_TOTAL_BASES", type: "player_total_bases" }
+        { marketId: "MGM_MARKET_TOTAL_BASES", type: "player_total_bases" },
+        { marketId: "MGM_MARKET_MONEYLINE", type: "moneyline" }
       ]
     }
   ];
@@ -48,6 +49,17 @@ function getMockBetMGMOptions() {
           participant: "Luis Arraez",
           line: "2+"
         }
+      ]
+    },
+    {
+      fixtureId: "MGM_REAL_FIXTURE_001",
+      marketId: "MGM_MARKET_MONEYLINE",
+      options: [
+        { optionId: "MGM_OPTION_TWINS_ML", participant: "Minnesota Twins" },
+        { optionId: "MGM_OPTION_ORIOLES_ML", participant: "Baltimore Orioles" },
+        { optionId: "MGM_OPTION_WHITE_SOX_ML", participant: "Chicago White Sox" },
+        { optionId: "MGM_OPTION_PIRATES_ML", participant: "Pittsburgh Pirates" },
+        { optionId: "MGM_OPTION_PHILLIES_ML", participant: "Philadelphia Phillies" }
       ]
     }
   ];
@@ -84,6 +96,11 @@ function slug(text) {
 
 function stripPitchers(eventText) {
   return clean(eventText).replace(/\([^)]*\)/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function previewObject(obj, maxLen = 1200) {
+  const raw = JSON.stringify(obj, null, 2);
+  return raw.length > maxLen ? raw.slice(0, maxLen) + "\n...truncated..." : raw;
 }
 
 function teamAliasMap() {
@@ -184,6 +201,7 @@ function normalizeMarketType(market = "") {
 
   if (m.includes("home run")) return "player_home_run";
   if (m.includes("total bases")) return "player_total_bases";
+  if (m.includes("moneyline")) return "moneyline";
 
   return m;
 }
@@ -295,7 +313,8 @@ async function searchBetMGMFixtures(leg) {
 async function searchBetMGMMarkets(fixtureId, leg) {
   const marketTable = {
     player_home_run: "MGM_MARKET_HR",
-    player_total_bases: "MGM_MARKET_TOTAL_BASES"
+    player_total_bases: "MGM_MARKET_TOTAL_BASES",
+    moneyline: "MGM_MARKET_MONEYLINE"
   };
 
   const marketId = marketTable[leg.marketType];
@@ -441,6 +460,29 @@ resolverNote: ${l.resolverNote || ""}`
     .join("\n\n");
 }
 
+async function buildSgoDebugMessage() {
+  const sgo = await fetchSportsGameOddsMLBEvents();
+
+  if (!sgo.success) {
+    return `SGO debug failed:\n\n${sgo.error || "Unknown error"}`;
+  }
+
+  const sample = sgo.data.slice(0, 3).map((eventObj, i) => {
+    const teams = extractEventTeamsFromSportsGameOddsEvent(eventObj);
+    return `${i + 1}. extractedTeams: ${teams.join(" | ") || "none"}
+raw:
+${previewObject(eventObj, 700)}`;
+  });
+
+  return [
+    "SGO debug:",
+    "",
+    `eventCount: ${sgo.data.length}`,
+    "",
+    ...sample
+  ].join("\n\n");
+}
+
 /* =========================
    SEND
 ========================= */
@@ -482,6 +524,12 @@ app.post("/webhook", async (req, res) => {
 
         const sender = event.sender.id;
         const text = event.message.text;
+
+        if (text?.toLowerCase() === "sgo debug") {
+          const msg = await buildSgoDebugMessage();
+          await sendMessage(sender, msg);
+          continue;
+        }
 
         let imageUrl = null;
 
