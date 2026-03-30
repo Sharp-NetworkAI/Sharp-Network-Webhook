@@ -14,23 +14,9 @@ const userSlipStore = {};
 /* =========================
    MOCK DATA (market + option still mocked)
 ========================= */
-function getMockBetMGMMkts() {
-  return [
-    {
-      fixtureId: "MGM_REAL_FIXTURE_001",
-      markets: [
-        { marketId: "MGM_MARKET_HR", type: "player_home_run" },
-        { marketId: "MGM_MARKET_TOTAL_BASES", type: "player_total_bases" },
-        { marketId: "MGM_MARKET_MONEYLINE", type: "moneyline" }
-      ]
-    }
-  ];
-}
-
 function getMockBetMGMOptions() {
   return [
     {
-      fixtureId: "MGM_REAL_FIXTURE_001",
       marketId: "MGM_MARKET_HR",
       options: [
         { optionId: "MGM_OPTION_HELIOT_RAMOS_HR", participant: "Heliot Ramos" },
@@ -41,7 +27,6 @@ function getMockBetMGMOptions() {
       ]
     },
     {
-      fixtureId: "MGM_REAL_FIXTURE_001",
       marketId: "MGM_MARKET_TOTAL_BASES",
       options: [
         {
@@ -52,7 +37,6 @@ function getMockBetMGMOptions() {
       ]
     },
     {
-      fixtureId: "MGM_REAL_FIXTURE_001",
       marketId: "MGM_MARKET_MONEYLINE",
       options: [
         { optionId: "MGM_OPTION_TWINS_ML", participant: "Minnesota Twins" },
@@ -98,11 +82,6 @@ function stripPitchers(eventText) {
   return clean(eventText).replace(/\([^)]*\)/g, " ").replace(/\s+/g, " ").trim();
 }
 
-function previewObject(obj, maxLen = 1200) {
-  const raw = JSON.stringify(obj, null, 2);
-  return raw.length > maxLen ? raw.slice(0, maxLen) + "\n...truncated..." : raw;
-}
-
 function teamAliasMap() {
   return {
     "new york yankees": ["new york yankees", "yankees"],
@@ -134,8 +113,7 @@ function teamAliasMap() {
     "detroit tigers": ["detroit tigers", "tigers"],
     "san diego padres": ["san diego padres", "padres"],
     "colorado rockies": ["colorado rockies", "rockies"],
-    "chicago white sox": ["chicago white sox", "white sox"],
-    "los angeles angels": ["los angeles angels", "angels"]
+    "chicago white sox": ["chicago white sox", "white sox"]
   };
 }
 
@@ -185,14 +163,6 @@ function extractEventTeamsFromSportsGameOddsEvent(eventObj) {
   return [...new Set(found)];
 }
 
-function overlapScore(wantedTeams, eventTeams) {
-  let score = 0;
-  for (const team of wantedTeams) {
-    if (eventTeams.includes(team)) score += 1;
-  }
-  return score;
-}
-
 /* =========================
    NORMALIZATION
 ========================= */
@@ -229,7 +199,7 @@ async function fetchSportsGameOddsMLBEvents() {
     return { success: false, error: "SPORTSGAMEODDS_API_KEY missing", data: [] };
   }
 
-  const url = "https://api.sportsgameodds.com/v2/events?leagueID=MLB&limit=200";
+  const url = "https://api.sportsgameodds.com/v2/events?leagueID=MLB&limit=50";
 
   const resp = await fetch(url, {
     headers: {
@@ -273,32 +243,17 @@ async function searchBetMGMFixtures(leg) {
     };
   }
 
-  let bestMatch = null;
-  let bestScore = 0;
-
   for (const eventObj of sgo.data) {
     const eventTeams = extractEventTeamsFromSportsGameOddsEvent(eventObj);
-    const score = overlapScore(wantedTeams, eventTeams);
+    const allMatched = wantedTeams.every((team) => eventTeams.includes(team));
 
-    if (score > bestScore) {
-      bestScore = score;
-      bestMatch = eventObj;
-    }
-
-    if (score >= 2) {
+    if (allMatched) {
       return {
         resolved: true,
         fixtureId: clean(eventObj.eventID || eventObj.id || eventObj.gameID || ""),
         rawEvent: eventObj
       };
     }
-  }
-
-  if (bestMatch && bestScore === 1) {
-    return {
-      resolved: false,
-      reason: "Only one team matched a live SportsGameOdds event"
-    };
   }
 
   return {
@@ -318,39 +273,24 @@ async function searchBetMGMMarkets(fixtureId, leg) {
   };
 
   const marketId = marketTable[leg.marketType];
-
-  if (!marketId) {
-    return { resolved: false };
-  }
-
+  if (!marketId) return { resolved: false };
   return { resolved: true, marketId };
 }
 
 async function searchBetMGMOptions(fixtureId, marketId, leg) {
   const bucket = getMockBetMGMOptions().find((o) => o.marketId === marketId);
-
-  if (!bucket) {
-    return { resolved: false };
-  }
+  if (!bucket) return { resolved: false };
 
   const option = bucket.options.find((o) => {
     const sameParticipant =
       clean(o.participant).toLowerCase() === clean(leg.participant).toLowerCase();
-
     const sameLine =
       !o.line || !leg.line || clean(o.line) === clean(leg.line);
-
     return sameParticipant && sameLine;
   });
 
-  if (!option) {
-    return { resolved: false };
-  }
-
-  return {
-    resolved: true,
-    optionId: option.optionId
-  };
+  if (!option) return { resolved: false };
+  return { resolved: true, optionId: option.optionId };
 }
 
 async function resolveLeg(leg) {
@@ -390,7 +330,7 @@ async function resolveLeg(leg) {
 }
 
 /* =========================
-   BETSLIP / DEEP LINK BUILDER
+   BUILDERS
 ========================= */
 function buildBetMGMBetslip(resolvedLegs) {
   return {
@@ -407,17 +347,12 @@ function buildBetMGMBetslip(resolvedLegs) {
 function buildBetMGMDeepLink(resolvedLegs) {
   const validLegs = resolvedLegs.filter(
     (l) =>
-      l.fixtureId &&
-      l.marketId &&
-      l.optionId &&
       l.fixtureId !== "NOT_FOUND" &&
       l.marketId !== "NOT_FOUND" &&
       l.optionId !== "NOT_FOUND"
   );
 
-  if (!validLegs.length) {
-    return null;
-  }
+  if (!validLegs.length) return null;
 
   const optionsString = validLegs
     .map((l) => `${l.fixtureId}-${l.marketId}-${l.optionId}`)
@@ -464,30 +399,38 @@ async function buildSgoDebugMessage() {
   const sgo = await fetchSportsGameOddsMLBEvents();
 
   if (!sgo.success) {
-    return `SGO debug failed:\n\n${sgo.error || "Unknown error"}`;
+    return `SGO debug failed\n\n${sgo.error || "Unknown error"}`;
   }
 
   const sample = sgo.data.slice(0, 3).map((eventObj, i) => {
     const teams = extractEventTeamsFromSportsGameOddsEvent(eventObj);
-    return `${i + 1}. extractedTeams: ${teams.join(" | ") || "none"}
-raw:
-${previewObject(eventObj, 700)}`;
+    const eventId = clean(eventObj.eventID || eventObj.id || eventObj.gameID || "none");
+    const display =
+      clean(
+        eventObj.name ||
+        eventObj.displayName ||
+        `${eventObj.awayTeamName || ""} @ ${eventObj.homeTeamName || ""}`
+      ) || "no display";
+
+    return `${i + 1}. eventId: ${eventId}
+display: ${display}
+teams: ${teams.join(" | ") || "none"}`;
   });
 
   return [
-    "SGO debug:",
+    "SGO debug",
     "",
     `eventCount: ${sgo.data.length}`,
     "",
     ...sample
-  ].join("\n\n");
+  ].join("\n");
 }
 
 /* =========================
    SEND
 ========================= */
 async function sendMessage(id, text) {
-  await fetch(
+  const resp = await fetch(
     `https://graph.facebook.com/v18.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`,
     {
       method: "POST",
@@ -498,6 +441,11 @@ async function sendMessage(id, text) {
       })
     }
   );
+
+  if (!resp.ok) {
+    const err = await resp.text().catch(() => "");
+    console.error("FB send error:", err);
+  }
 }
 
 /* =========================
@@ -524,15 +472,16 @@ app.post("/webhook", async (req, res) => {
 
         const sender = event.sender.id;
         const text = event.message.text;
+        console.log("incoming text:", text || "[no text]");
 
         if (text?.toLowerCase() === "sgo debug") {
           const msg = await buildSgoDebugMessage();
+          console.log("sending sgo debug");
           await sendMessage(sender, msg);
           continue;
         }
 
         let imageUrl = null;
-
         if (event.message.attachments) {
           const img = event.message.attachments.find((a) => a.type === "image");
           if (img) imageUrl = img.payload.url;
