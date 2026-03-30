@@ -147,8 +147,8 @@ function extractTeamsFromLegEvent(eventText) {
 function extractEventTeamsFromSportsGameOddsEvent(eventObj) {
   const candidates = [];
 
-  if (eventObj?.teams?.home) candidates.push(eventObj.teams.home);
-  if (eventObj?.teams?.away) candidates.push(eventObj.teams.away);
+  if (eventObj?.teams?.home && typeof eventObj.teams.home === "string") candidates.push(eventObj.teams.home);
+  if (eventObj?.teams?.away && typeof eventObj.teams.away === "string") candidates.push(eventObj.teams.away);
 
   candidates.push(
     eventObj.homeTeamName,
@@ -409,27 +409,21 @@ resolverNote: ${l.resolverNote || ""}`
 
 function buildSgoDebugMessage(eventObj, count) {
   const topKeys = Object.keys(eventObj || {});
-  const nestedSummaries = [];
-
-  for (const key of topKeys.slice(0, 12)) {
-    const value = eventObj[key];
-    if (value && typeof value === "object" && !Array.isArray(value)) {
-      nestedSummaries.push(`${key}: {${Object.keys(value).slice(0, 8).join(", ")}}`);
-    } else if (Array.isArray(value)) {
-      nestedSummaries.push(`${key}: [len=${value.length}]`);
-    }
-  }
+  const homeKeys = Object.keys(eventObj?.teams?.home || {});
+  const awayKeys = Object.keys(eventObj?.teams?.away || {});
 
   const sampleValues = [
     `eventID=${clean(eventObj?.eventID)}`,
-    `id=${clean(eventObj?.id)}`,
-    `gameID=${clean(eventObj?.gameID)}`,
-    `name=${clean(eventObj?.name)}`,
-    `displayName=${clean(eventObj?.displayName)}`,
-    `homeTeamName=${clean(eventObj?.homeTeamName)}`,
-    `awayTeamName=${clean(eventObj?.awayTeamName)}`,
-    `teams.home=${clean(eventObj?.teams?.home)}`,
-    `teams.away=${clean(eventObj?.teams?.away)}`
+    `teams.home keys=${homeKeys.join(", ") || "none"}`,
+    `teams.away keys=${awayKeys.join(", ") || "none"}`,
+    `teams.home.name=${clean(eventObj?.teams?.home?.name)}`,
+    `teams.home.displayName=${clean(eventObj?.teams?.home?.displayName)}`,
+    `teams.home.abbreviation=${clean(eventObj?.teams?.home?.abbreviation)}`,
+    `teams.home.fullName=${clean(eventObj?.teams?.home?.fullName)}`,
+    `teams.away.name=${clean(eventObj?.teams?.away?.name)}`,
+    `teams.away.displayName=${clean(eventObj?.teams?.away?.displayName)}`,
+    `teams.away.abbreviation=${clean(eventObj?.teams?.away?.abbreviation)}`,
+    `teams.away.fullName=${clean(eventObj?.teams?.away?.fullName)}`
   ].join("\n");
 
   return [
@@ -439,10 +433,7 @@ function buildSgoDebugMessage(eventObj, count) {
     `topKeys: ${topKeys.join(", ") || "none"}`,
     "",
     "sampleValues:",
-    sampleValues,
-    "",
-    "nested:",
-    nestedSummaries.join("\n") || "none"
+    sampleValues
   ].join("\n").slice(0, 1900);
 }
 
@@ -504,7 +495,7 @@ app.post("/webhook", async (req, res) => {
 
           const first = sgo.data[0] || {};
           const msg = buildSgoDebugMessage(first, sgo.data.length);
-          console.log("sending sgo debug with teams.home/away");
+          console.log("sending sgo debug with home/away keys");
           await sendMessage(sender, msg);
           continue;
         }
