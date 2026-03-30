@@ -199,7 +199,7 @@ async function fetchSportsGameOddsMLBEvents() {
     return { success: false, error: "SPORTSGAMEODDS_API_KEY missing", data: [] };
   }
 
-  const url = "https://api.sportsgameodds.com/v2/events?leagueID=MLB&limit=10";
+  const url = "https://api.sportsgameodds.com/v2/events?leagueID=MLB&limit=50";
 
   const resp = await fetch(url, {
     headers: {
@@ -399,23 +399,30 @@ async function buildSgoDebugMessage() {
   const sgo = await fetchSportsGameOddsMLBEvents();
 
   if (!sgo.success) {
-    return `SGO debug failed\n\n${sgo.error || "Unknown error"}`;
+    return `SGO debug failed\n${sgo.error || "Unknown error"}`;
   }
 
-  const first = sgo.data[0];
-  if (!first) {
-    return "SGO debug\n\nNo events returned.";
-  }
-
-  return [
+  const lines = [
     "SGO debug",
-    "",
-    `eventCount: ${sgo.data.length}`,
-    "",
-    "First raw event:",
-    "",
-    JSON.stringify(first, null, 2).slice(0, 2500)
-  ].join("\n");
+    `eventCount: ${sgo.data.length}`
+  ];
+
+  for (let i = 0; i < Math.min(3, sgo.data.length); i++) {
+    const e = sgo.data[i];
+    const eventId = clean(e.eventID || e.id || e.gameID || "none");
+    const display = clean(
+      e.name ||
+      e.displayName ||
+      `${e.awayTeamName || ""} @ ${e.homeTeamName || ""}`
+    ) || "no display";
+    const teams = extractEventTeamsFromSportsGameOddsEvent(e).join(" | ") || "none";
+
+    lines.push(`${i + 1}. ${eventId}`);
+    lines.push(`display: ${display}`);
+    lines.push(`teams: ${teams}`);
+  }
+
+  return lines.join("\n");
 }
 
 /* =========================
@@ -468,6 +475,7 @@ app.post("/webhook", async (req, res) => {
 
         if (text?.toLowerCase() === "sgo debug") {
           const msg = await buildSgoDebugMessage();
+          console.log("sending sgo debug short");
           await sendMessage(sender, msg);
           continue;
         }
