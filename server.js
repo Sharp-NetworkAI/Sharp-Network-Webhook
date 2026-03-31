@@ -7,7 +7,7 @@ const PORT = process.env.PORT || 3000;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "sharpnetworkbot";
 const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const SPORTSGAMEODDS_API_KEY = process.env.SPORTSGAMEODDS_API_KEY;
+const ODDS_API_KEY = process.env.ODDS_API_KEY;
 
 const userSlipStore = {};
 
@@ -91,7 +91,7 @@ function teamAliasMap() {
     "atlanta braves": ["atlanta braves", "braves", "atl"],
     "cincinnati reds": ["cincinnati reds", "reds"],
     "milwaukee brewers": ["milwaukee brewers", "brewers"],
-    "st louis cardinals": ["st louis cardinals", "cardinals"],
+    "st louis cardinals": ["st louis cardinals", "cardinals", "st louis"],
     "new york mets": ["new york mets", "mets"],
     "philadelphia phillies": ["philadelphia phillies", "phillies"],
     "boston red sox": ["boston red sox", "red sox"],
@@ -103,11 +103,11 @@ function teamAliasMap() {
     "arizona diamondbacks": ["arizona diamondbacks", "diamondbacks", "dbacks"],
     "washington nationals": ["washington nationals", "nationals", "nats"],
     "seattle mariners": ["seattle mariners", "mariners"],
-    "kansas city royals": ["kansas city royals", "royals"],
+    "kansas city royals": ["kansas city royals", "royals", "kc"],
     "toronto blue jays": ["toronto blue jays", "blue jays", "jays"],
     "pittsburgh pirates": ["pittsburgh pirates", "pirates"],
     "tampa bay rays": ["tampa bay rays", "rays"],
-    "texas rangers": ["texas rangers", "rangers"],
+    "texas rangers": ["texas rangers", "rangers", "tex"],
     "miami marlins": ["miami marlins", "marlins"],
     "oakland athletics": ["oakland athletics", "athletics", "as", "a s"],
     "detroit tigers": ["detroit tigers", "tigers"],
@@ -144,43 +144,6 @@ function extractTeamsFromLegEvent(eventText) {
   return [...new Set(matches)];
 }
 
-function getNameCandidatesFromTeamObject(teamObj) {
-  if (!teamObj || typeof teamObj !== "object") return [];
-
-  const namesObj = teamObj.names || {};
-  const candidates = [
-    namesObj.short,
-    namesObj.medium,
-    namesObj.long,
-    teamObj.name,
-    teamObj.displayName,
-    teamObj.fullName,
-    teamObj.abbreviation
-  ];
-
-  for (const value of Object.values(namesObj)) {
-    if (typeof value === "string") candidates.push(value);
-  }
-
-  return candidates.filter(Boolean);
-}
-
-function extractEventTeamsFromSportsGameOddsEvent(eventObj) {
-  const candidates = [];
-
-  candidates.push(...getNameCandidatesFromTeamObject(eventObj?.teams?.home));
-  candidates.push(...getNameCandidatesFromTeamObject(eventObj?.teams?.away));
-
-  const found = [];
-
-  for (const candidate of candidates) {
-    const canonical = canonicalizeTeamName(candidate);
-    if (canonical) found.push(canonical);
-  }
-
-  return [...new Set(found)];
-}
-
 /* =========================
    NORMALIZATION
 ========================= */
@@ -210,36 +173,50 @@ function normalizeLeg(leg, fallbackEvent = "") {
 }
 
 /* =========================
-   LIVE FIXTURE RESOLVER
+   LIVE FIXTURE RESOLVER (THE ODDS API)
 ========================= */
-async function fetchSportsGameOddsMLBEvents() {
-  if (!SPORTSGAMEODDS_API_KEY) {
-    return { success: false, error: "SPORTSGAMEODDS_API_KEY missing", data: [] };
+async function fetchOddsApiMLBEvents() {
+  if (!ODDS_API_KEY) {
+    return { success: false, error: "ODDS_API_KEY missing", data: [] };
   }
 
-  const url = "https://api.sportsgameodds.com/v2/events?leagueID=MLB&limit=50";
+  const url =
+    `https://api.the-odds-api.com/v4/sports/baseball_mlb/odds` +
+    `?apiKey=${encodeURIComponent(ODDS_API_KEY)}` +
+    `&regions=us&markets=h2h&oddsFormat=american`;
 
-  const resp = await fetch(url, {
-    headers: {
-      "x-api-key": SPORTSGAMEODDS_API_KEY
-    }
-  });
-
-  const data = await resp.json().catch(() => ({}));
+  const resp = await fetch(url);
+  const data = await resp.json().catch(() => []);
 
   if (!resp.ok) {
     return {
       success: false,
-      error: data?.error || `SportsGameOdds HTTP ${resp.status}`,
+      error: Array.isArray(data) ? `The Odds API HTTP ${resp.status}` : (data?.message || `The Odds API HTTP ${resp.status}`),
       data: []
     };
   }
 
   return {
-    success: data?.success !== false,
-    error: data?.error || null,
-    data: Array.isArray(data?.data) ? data.data : []
+    success: true,
+    error: null,
+    data: Array.isArray(data) ? data : []
   };
+}
+
+function extractEventTeamsFromOddsApiEvent(eventObj) {
+  const candidates = [
+    eventObj.home_team,
+    eventObj.away_team
+  ].filter(Boolean);
+
+  const found = [];
+
+  for (const candidate of candidates) {
+    const canonical = canonicalizeTeamName(candidate);
+    if (canonical) found.push(canonical);
+  }
+
+  return [...new Set(found)];
 }
 
 async function searchBetMGMFixtures(leg) {
@@ -252,23 +229,23 @@ async function searchBetMGMFixtures(leg) {
     };
   }
 
-  const sgo = await fetchSportsGameOddsMLBEvents();
+  const odds = await fetchOddsApiMLBEvents();
 
-  if (!sgo.success) {
+  if (!odds.success) {
     return {
       resolved: false,
-      reason: sgo.error || "SportsGameOdds lookup failed"
+      reason: odds.error || "The Odds API lookup failed"
     };
   }
 
-  for (const eventObj of sgo.data) {
-    const eventTeams = extractEventTeamsFromSportsGameOddsEvent(eventObj);
+  for (const eventObj of odds.data) {
+    const eventTeams = extractEventTeamsFromOddsApiEvent(eventObj);
     const allMatched = wantedTeams.every((team) => eventTeams.includes(team));
 
     if (allMatched) {
       return {
         resolved: true,
-        fixtureId: clean(eventObj.eventID || ""),
+        fixtureId: clean(eventObj.id || ""),
         rawEvent: eventObj
       };
     }
@@ -276,7 +253,7 @@ async function searchBetMGMFixtures(leg) {
 
   return {
     resolved: false,
-    reason: "No live SportsGameOdds event matched parsed teams"
+    reason: "No live The Odds API event matched parsed teams"
   };
 }
 
@@ -413,23 +390,19 @@ resolverNote: ${l.resolverNote || ""}`
     .join("\n\n");
 }
 
-async function buildSgoLinesMessage() {
-  const sgo = await fetchSportsGameOddsMLBEvents();
+async function buildOddsLinesMessage() {
+  const odds = await fetchOddsApiMLBEvents();
 
-  if (!sgo.success) {
-    return `SGO lines failed\n${sgo.error || "Unknown error"}`;
+  if (!odds.success) {
+    return `Odds debug failed\n${odds.error || "Unknown error"}`;
   }
 
-  const lines = ["SGO lines", `eventCount: ${sgo.data.length}`, ""];
+  const lines = ["Odds lines", `eventCount: ${odds.data.length}`, ""];
 
-  for (const eventObj of sgo.data.slice(0, 10)) {
-    const fixtureId = clean(eventObj.eventID || "");
-    const homeNames = getNameCandidatesFromTeamObject(eventObj?.teams?.home);
-    const awayNames = getNameCandidatesFromTeamObject(eventObj?.teams?.away);
-
-    lines.push(`fixtureId: ${fixtureId}`);
-    lines.push(`home: ${homeNames.join(" | ") || "none"}`);
-    lines.push(`away: ${awayNames.join(" | ") || "none"}`);
+  for (const eventObj of odds.data.slice(0, 10)) {
+    lines.push(`fixtureId: ${clean(eventObj.id)}`);
+    lines.push(`home: ${clean(eventObj.home_team) || "none"}`);
+    lines.push(`away: ${clean(eventObj.away_team) || "none"}`);
     lines.push("");
   }
 
@@ -571,8 +544,8 @@ app.post("/webhook", async (req, res) => {
           continue;
         }
 
-        if (text?.toLowerCase() === "sgo lines") {
-          const msg = await buildSgoLinesMessage();
+        if (text?.toLowerCase() === "odds lines") {
+          const msg = await buildOddsLinesMessage();
           await sendMessage(sender, msg);
           continue;
         }
