@@ -12,7 +12,17 @@ const ODDS_API_KEY = process.env.ODDS_API_KEY;
 const userSlipStore = {};
 
 /* =========================
-   MOCK DATA (market + option still mocked)
+   SIMPLE ODDS API CACHE
+========================= */
+let oddsCache = {
+  fetchedAt: 0,
+  data: []
+};
+
+const ODDS_CACHE_TTL_MS = 60 * 1000;
+
+/* =========================
+   MOCK DATA (expanded moneyline options)
 ========================= */
 function getMockBetMGMOptions() {
   return [
@@ -39,11 +49,34 @@ function getMockBetMGMOptions() {
     {
       marketId: "MGM_MARKET_MONEYLINE",
       options: [
-        { optionId: "MGM_OPTION_TWINS_ML", participant: "Minnesota Twins" },
         { optionId: "MGM_OPTION_ORIOLES_ML", participant: "Baltimore Orioles" },
         { optionId: "MGM_OPTION_WHITE_SOX_ML", participant: "Chicago White Sox" },
         { optionId: "MGM_OPTION_PIRATES_ML", participant: "Pittsburgh Pirates" },
-        { optionId: "MGM_OPTION_PHILLIES_ML", participant: "Philadelphia Phillies" }
+        { optionId: "MGM_OPTION_PHILLIES_ML", participant: "Philadelphia Phillies" },
+        { optionId: "MGM_OPTION_BLUE_JAYS_ML", participant: "Toronto Blue Jays" },
+        { optionId: "MGM_OPTION_BRAVES_ML", participant: "Atlanta Braves" },
+        { optionId: "MGM_OPTION_CUBS_ML", participant: "Chicago Cubs" },
+        { optionId: "MGM_OPTION_BREWERS_ML", participant: "Milwaukee Brewers" },
+        { optionId: "MGM_OPTION_METS_ML", participant: "New York Mets" },
+        { optionId: "MGM_OPTION_ASTROS_ML", participant: "Houston Astros" },
+        { optionId: "MGM_OPTION_YANKEES_ML", participant: "New York Yankees" },
+        { optionId: "MGM_OPTION_GIANTS_ML", participant: "San Francisco Giants" },
+        { optionId: "MGM_OPTION_DODGERS_ML", participant: "Los Angeles Dodgers" },
+        { optionId: "MGM_OPTION_TWINS_ML", participant: "Minnesota Twins" },
+        { optionId: "MGM_OPTION_ROYALS_ML", participant: "Kansas City Royals" },
+        { optionId: "MGM_OPTION_RANGERS_ML", participant: "Texas Rangers" },
+        { optionId: "MGM_OPTION_MARLINS_ML", participant: "Miami Marlins" },
+        { optionId: "MGM_OPTION_REDS_ML", participant: "Cincinnati Reds" },
+        { optionId: "MGM_OPTION_NATIONALS_ML", participant: "Washington Nationals" },
+        { optionId: "MGM_OPTION_ROCKIES_ML", participant: "Colorado Rockies" },
+        { optionId: "MGM_OPTION_ATHLETICS_ML", participant: "Athletics" },
+        { optionId: "MGM_OPTION_ANGELS_ML", participant: "Los Angeles Angels" },
+        { optionId: "MGM_OPTION_RAYS_ML", participant: "Tampa Bay Rays" },
+        { optionId: "MGM_OPTION_CARDINALS_ML", participant: "St. Louis Cardinals" },
+        { optionId: "MGM_OPTION_RED_SOX_ML", participant: "Boston Red Sox" },
+        { optionId: "MGM_OPTION_MARINERS_ML", participant: "Seattle Mariners" },
+        { optionId: "MGM_OPTION_PADRES_ML", participant: "San Diego Padres" },
+        { optionId: "MGM_OPTION_GUARDIANS_ML", participant: "Cleveland Guardians" }
       ]
     }
   ];
@@ -82,6 +115,34 @@ function stripPitchers(eventText) {
   return clean(eventText).replace(/\([^)]*\)/g, " ").replace(/\s+/g, " ").trim();
 }
 
+function splitIntoChunks(text, maxLen = 1800) {
+  if (text.length <= maxLen) return [text];
+
+  const parts = text.split("\n\n");
+  const chunks = [];
+  let current = "";
+
+  for (const part of parts) {
+    const candidate = current ? `${current}\n\n${part}` : part;
+    if (candidate.length <= maxLen) {
+      current = candidate;
+    } else {
+      if (current) chunks.push(current);
+      if (part.length <= maxLen) {
+        current = part;
+      } else {
+        for (let i = 0; i < part.length; i += maxLen) {
+          chunks.push(part.slice(i, i + maxLen));
+        }
+        current = "";
+      }
+    }
+  }
+
+  if (current) chunks.push(current);
+  return chunks;
+}
+
 function teamAliasMap() {
   return {
     "new york yankees": ["new york yankees", "yankees"],
@@ -91,7 +152,7 @@ function teamAliasMap() {
     "atlanta braves": ["atlanta braves", "braves", "atl"],
     "cincinnati reds": ["cincinnati reds", "reds"],
     "milwaukee brewers": ["milwaukee brewers", "brewers"],
-    "st louis cardinals": ["st louis cardinals", "cardinals", "st louis"],
+    "st. louis cardinals": ["st louis cardinals", "st. louis cardinals", "cardinals", "st louis"],
     "new york mets": ["new york mets", "mets"],
     "philadelphia phillies": ["philadelphia phillies", "phillies"],
     "boston red sox": ["boston red sox", "red sox"],
@@ -109,8 +170,7 @@ function teamAliasMap() {
     "tampa bay rays": ["tampa bay rays", "rays"],
     "texas rangers": ["texas rangers", "rangers", "tex"],
     "miami marlins": ["miami marlins", "marlins"],
-    "oakland athletics": ["oakland athletics", "athletics", "as", "a s"],
-    "athletics": ["athletics", "as", "a s"],
+    "athletics": ["athletics", "oakland athletics", "as", "a s"],
     "detroit tigers": ["detroit tigers", "tigers"],
     "san diego padres": ["san diego padres", "padres", "sd"],
     "colorado rockies": ["colorado rockies", "rockies"],
@@ -177,6 +237,11 @@ function normalizeLeg(leg, fallbackEvent = "") {
    LIVE FIXTURE RESOLVER (THE ODDS API)
 ========================= */
 async function fetchOddsApiMLBEvents() {
+  const now = Date.now();
+  if (oddsCache.data.length && now - oddsCache.fetchedAt < ODDS_CACHE_TTL_MS) {
+    return { success: true, error: null, data: oddsCache.data, cached: true };
+  }
+
   if (!ODDS_API_KEY) {
     return { success: false, error: "ODDS_API_KEY missing", data: [] };
   }
@@ -192,15 +257,23 @@ async function fetchOddsApiMLBEvents() {
   if (!resp.ok) {
     return {
       success: false,
-      error: Array.isArray(data) ? `The Odds API HTTP ${resp.status}` : (data?.message || `The Odds API HTTP ${resp.status}`),
+      error: Array.isArray(data)
+        ? `The Odds API HTTP ${resp.status}`
+        : (data?.message || `The Odds API HTTP ${resp.status}`),
       data: []
     };
   }
 
+  oddsCache = {
+    fetchedAt: now,
+    data: Array.isArray(data) ? data : []
+  };
+
   return {
     success: true,
     error: null,
-    data: Array.isArray(data) ? data : []
+    data: oddsCache.data,
+    cached: false
   };
 }
 
@@ -220,7 +293,7 @@ function extractEventTeamsFromOddsApiEvent(eventObj) {
   return [...new Set(found)];
 }
 
-async function searchBetMGMFixtures(leg) {
+async function searchBetMGMFixtures(leg, oddsData = null) {
   const wantedTeams = extractTeamsFromLegEvent(leg.event);
 
   if (wantedTeams.length < 2) {
@@ -230,7 +303,7 @@ async function searchBetMGMFixtures(leg) {
     };
   }
 
-  const odds = await fetchOddsApiMLBEvents();
+  const odds = oddsData || await fetchOddsApiMLBEvents();
 
   if (!odds.success) {
     return {
@@ -289,8 +362,8 @@ async function searchBetMGMOptions(fixtureId, marketId, leg) {
   return { resolved: true, optionId: option.optionId };
 }
 
-async function resolveLeg(leg) {
-  const fixture = await searchBetMGMFixtures(leg);
+async function resolveLeg(leg, oddsData = null) {
+  const fixture = await searchBetMGMFixtures(leg, oddsData);
 
   if (!fixture.resolved) {
     return {
@@ -391,34 +464,6 @@ resolverNote: ${l.resolverNote || ""}`
     .join("\n\n");
 }
 
-function splitIntoChunks(text, maxLen = 1800) {
-  if (text.length <= maxLen) return [text];
-
-  const parts = text.split("\n\n");
-  const chunks = [];
-  let current = "";
-
-  for (const part of parts) {
-    const candidate = current ? `${current}\n\n${part}` : part;
-    if (candidate.length <= maxLen) {
-      current = candidate;
-    } else {
-      if (current) chunks.push(current);
-      if (part.length <= maxLen) {
-        current = part;
-      } else {
-        for (let i = 0; i < part.length; i += maxLen) {
-          chunks.push(part.slice(i, i + maxLen));
-        }
-        current = "";
-      }
-    }
-  }
-
-  if (current) chunks.push(current);
-  return chunks;
-}
-
 async function buildOddsLinesMessage() {
   const odds = await fetchOddsApiMLBEvents();
 
@@ -426,7 +471,12 @@ async function buildOddsLinesMessage() {
     return `Odds debug failed\n${odds.error || "Unknown error"}`;
   }
 
-  const lines = ["Odds lines", `eventCount: ${odds.data.length}`, ""];
+  const lines = [
+    "Odds lines",
+    `eventCount: ${odds.data.length}`,
+    `cached: ${odds.cached ? "yes" : "no"}`,
+    ""
+  ];
 
   for (const eventObj of odds.data.slice(0, 10)) {
     lines.push(`fixtureId: ${clean(eventObj.id)}`);
@@ -554,9 +604,11 @@ app.post("/webhook", async (req, res) => {
             continue;
           }
 
+          const oddsData = await fetchOddsApiMLBEvents();
+
           const resolved = [];
           for (const leg of saved.legs) {
-            resolved.push(await resolveLeg(leg));
+            resolved.push(await resolveLeg(leg, oddsData));
           }
 
           userSlipStore[sender].resolved = resolved;
