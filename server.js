@@ -110,6 +110,7 @@ function teamAliasMap() {
     "texas rangers": ["texas rangers", "rangers", "tex"],
     "miami marlins": ["miami marlins", "marlins"],
     "oakland athletics": ["oakland athletics", "athletics", "as", "a s"],
+    "athletics": ["athletics", "as", "a s"],
     "detroit tigers": ["detroit tigers", "tigers"],
     "san diego padres": ["san diego padres", "padres", "sd"],
     "colorado rockies": ["colorado rockies", "rockies"],
@@ -390,6 +391,34 @@ resolverNote: ${l.resolverNote || ""}`
     .join("\n\n");
 }
 
+function splitIntoChunks(text, maxLen = 1800) {
+  if (text.length <= maxLen) return [text];
+
+  const parts = text.split("\n\n");
+  const chunks = [];
+  let current = "";
+
+  for (const part of parts) {
+    const candidate = current ? `${current}\n\n${part}` : part;
+    if (candidate.length <= maxLen) {
+      current = candidate;
+    } else {
+      if (current) chunks.push(current);
+      if (part.length <= maxLen) {
+        current = part;
+      } else {
+        for (let i = 0; i < part.length; i += maxLen) {
+          chunks.push(part.slice(i, i + maxLen));
+        }
+        current = "";
+      }
+    }
+  }
+
+  if (current) chunks.push(current);
+  return chunks;
+}
+
 async function buildOddsLinesMessage() {
   const odds = await fetchOddsApiMLBEvents();
 
@@ -428,6 +457,13 @@ async function sendMessage(id, text) {
   if (!resp.ok) {
     const err = await resp.text().catch(() => "");
     console.error("FB send error:", err);
+  }
+}
+
+async function sendLongMessage(id, text) {
+  const chunks = splitIntoChunks(text);
+  for (const chunk of chunks) {
+    await sendMessage(id, chunk);
   }
 }
 
@@ -533,6 +569,7 @@ app.post("/webhook", async (req, res) => {
         }
 
         if (text?.toLowerCase() === "payload debug") {
+          console.log("payload debug branch hit");
           const saved = userSlipStore[sender];
 
           if (!saved?.resolved) {
@@ -540,7 +577,8 @@ app.post("/webhook", async (req, res) => {
             continue;
           }
 
-          await sendMessage(sender, buildDebug(saved.resolved));
+          const debugText = buildDebug(saved.resolved);
+          await sendLongMessage(sender, debugText);
           continue;
         }
 
