@@ -11,9 +11,6 @@ const ODDS_API_KEY = process.env.ODDS_API_KEY;
 
 const userSlipStore = {};
 
-/* =========================
-   SIMPLE ODDS API CACHE
-========================= */
 let oddsCache = {
   fetchedAt: 0,
   data: []
@@ -21,9 +18,6 @@ let oddsCache = {
 
 const ODDS_CACHE_TTL_MS = 60 * 1000;
 
-/* =========================
-   MOCK DATA
-========================= */
 function getMockBetMGMOptions() {
   return [
     {
@@ -61,14 +55,27 @@ function getMockBetMGMOptions() {
         { optionId: "MGM_OPTION_ASTROS_ML", participant: "Houston Astros" },
         { optionId: "MGM_OPTION_YANKEES_ML", participant: "New York Yankees" },
         { optionId: "MGM_OPTION_GIANTS_ML", participant: "San Francisco Giants" },
-        { optionId: "MGM_OPTION_DODGERS_ML", participant: "Los Angeles Dodgers" }
+        { optionId: "MGM_OPTION_DODGERS_ML", participant: "Los Angeles Dodgers" },
+        { optionId: "MGM_OPTION_TWINS_ML", participant: "Minnesota Twins" },
+        { optionId: "MGM_OPTION_ROYALS_ML", participant: "Kansas City Royals" },
+        { optionId: "MGM_OPTION_RANGERS_ML", participant: "Texas Rangers" },
+        { optionId: "MGM_OPTION_MARLINS_ML", participant: "Miami Marlins" },
+        { optionId: "MGM_OPTION_REDS_ML", participant: "Cincinnati Reds" },
+        { optionId: "MGM_OPTION_NATIONALS_ML", participant: "Washington Nationals" },
+        { optionId: "MGM_OPTION_ROCKIES_ML", participant: "Colorado Rockies" },
+        { optionId: "MGM_OPTION_ATHLETICS_ML", participant: "Athletics" },
+        { optionId: "MGM_OPTION_ANGELS_ML", participant: "Los Angeles Angels" },
+        { optionId: "MGM_OPTION_RAYS_ML", participant: "Tampa Bay Rays" },
+        { optionId: "MGM_OPTION_CARDINALS_ML", participant: "St. Louis Cardinals" },
+        { optionId: "MGM_OPTION_RED_SOX_ML", participant: "Boston Red Sox" },
+        { optionId: "MGM_OPTION_MARINERS_ML", participant: "Seattle Mariners" },
+        { optionId: "MGM_OPTION_PADRES_ML", participant: "San Diego Padres" },
+        { optionId: "MGM_OPTION_GUARDIANS_ML", participant: "Cleveland Guardians" }
       ]
     }
   ];
 }
-/* =========================
-   HELPERS
-========================= */
+
 function safeParseJSON(text) {
   try {
     return JSON.parse(text);
@@ -129,27 +136,41 @@ function splitIntoChunks(text, maxLen = 1800) {
   }
 
   if (current) chunks.push(current);
-
   return chunks;
 }
-/* =========================
-   TEAM MATCHING (FIXED)
-========================= */
+
 function teamAliasMap() {
   return {
-    "baltimore orioles": ["orioles", "baltimore orioles", "bal"],
-    "texas rangers": ["rangers", "texas rangers", "tex"],
-    "miami marlins": ["marlins", "miami marlins", "mia"],
-    "chicago white sox": ["white sox", "cws"],
-    "pittsburgh pirates": ["pirates", "pit"],
-    "cincinnati reds": ["reds", "cin"],
-    "philadelphia phillies": ["phillies", "phi"],
-    "washington nationals": ["nationals", "nats", "was"],
-    "houston astros": ["astros", "hou"],
-    "boston red sox": ["red sox", "bos"],
-    "new york yankees": ["yankees", "nyy"],
-    "los angeles dodgers": ["dodgers", "lad"],
-    "san francisco giants": ["giants", "sfg"]
+    "new york yankees": ["new york yankees", "yankees", "ny yankees", "new york yanks", "nyy"],
+    "san francisco giants": ["san francisco giants", "giants", "sf giants", "san fran giants", "sfg"],
+    "los angeles dodgers": ["los angeles dodgers", "dodgers", "la dodgers", "lad"],
+    "chicago cubs": ["chicago cubs", "cubs", "chc"],
+    "atlanta braves": ["atlanta braves", "braves", "atl"],
+    "cincinnati reds": ["cincinnati reds", "reds", "cin"],
+    "milwaukee brewers": ["milwaukee brewers", "brewers", "mil"],
+    "st. louis cardinals": ["st louis cardinals", "st. louis cardinals", "saint louis cardinals", "cardinals", "st louis", "stl"],
+    "new york mets": ["new york mets", "mets", "nym"],
+    "philadelphia phillies": ["philadelphia phillies", "phillies", "phils", "phi"],
+    "boston red sox": ["boston red sox", "red sox", "bos red sox", "bos"],
+    "baltimore orioles": ["baltimore orioles", "orioles", "os", "o s", "bal orioles", "bal"],
+    "cleveland guardians": ["cleveland guardians", "guardians", "cle guardians", "cle"],
+    "minnesota twins": ["minnesota twins", "twins", "min"],
+    "houston astros": ["houston astros", "astros", "hou astros", "hou"],
+    "los angeles angels": ["los angeles angels", "angels", "la angels", "laa"],
+    "arizona diamondbacks": ["arizona diamondbacks", "diamondbacks", "dbacks", "ari"],
+    "washington nationals": ["washington nationals", "nationals", "nats", "washington nats", "was"],
+    "seattle mariners": ["seattle mariners", "mariners", "sea"],
+    "kansas city royals": ["kansas city royals", "royals", "kc royals", "kc"],
+    "toronto blue jays": ["toronto blue jays", "blue jays", "jays", "tor"],
+    "pittsburgh pirates": ["pittsburgh pirates", "pirates", "pit"],
+    "tampa bay rays": ["tampa bay rays", "rays", "tb rays", "tb"],
+    "texas rangers": ["texas rangers", "rangers", "tex"],
+    "miami marlins": ["miami marlins", "marlins", "mia"],
+    "athletics": ["athletics", "oakland athletics", "a s", "as", "oak"],
+    "detroit tigers": ["detroit tigers", "tigers", "det"],
+    "san diego padres": ["san diego padres", "padres", "sd padres", "sd"],
+    "colorado rockies": ["colorado rockies", "rockies", "col"],
+    "chicago white sox": ["chicago white sox", "white sox", "chi white sox", "cws"]
   };
 }
 
@@ -179,9 +200,7 @@ function extractTeamsFromLegEvent(eventText) {
 
   return [...new Set(matches)];
 }
-/* =========================
-   NORMALIZATION
-========================= */
+
 function normalizeMarketType(market = "") {
   const m = clean(market).toLowerCase();
 
@@ -207,9 +226,6 @@ function normalizeLeg(leg, fallbackEvent = "") {
   };
 }
 
-/* =========================
-   LIVE FIXTURE RESOLVER (THE ODDS API)
-========================= */
 async function fetchOddsApiMLBEvents() {
   const now = Date.now();
 
@@ -263,9 +279,7 @@ function extractEventTeamsFromOddsApiEvent(eventObj) {
 
   return [...new Set(found)];
 }
-/* =========================
-   FIXTURE + MARKET + OPTION RESOLUTION
-========================= */
+
 async function searchBetMGMFixtures(leg, oddsData = null) {
   const wantedTeams = extractTeamsFromLegEvent(leg.event);
 
@@ -282,22 +296,20 @@ async function searchBetMGMFixtures(leg, oddsData = null) {
   if (!odds.success) {
     return {
       resolved: false,
-      reason: odds.error || "Odds API failed",
+      reason: odds.error || "The Odds API lookup failed",
       wantedTeams
     };
   }
 
   for (const eventObj of odds.data) {
     const eventTeams = extractEventTeamsFromOddsApiEvent(eventObj);
+    const allMatched = wantedTeams.every((team) => eventTeams.includes(team));
 
-    const match = wantedTeams.every(team =>
-      eventTeams.includes(team)
-    );
-
-    if (match) {
+    if (allMatched) {
       return {
         resolved: true,
-        fixtureId: clean(eventObj.id),
+        fixtureId: clean(eventObj.id || ""),
+        rawEvent: eventObj,
         wantedTeams,
         matchedTeams: eventTeams
       };
@@ -306,40 +318,37 @@ async function searchBetMGMFixtures(leg, oddsData = null) {
 
   return {
     resolved: false,
-    reason: "No matching game found",
+    reason: "No live The Odds API event matched parsed teams",
     wantedTeams
   };
 }
 
 async function searchBetMGMMarkets(fixtureId, leg) {
-  const map = {
+  const marketTable = {
     player_home_run: "MGM_MARKET_HR",
     player_total_bases: "MGM_MARKET_TOTAL_BASES",
     moneyline: "MGM_MARKET_MONEYLINE"
   };
 
-  if (!map[leg.marketType]) return { resolved: false };
-
-  return {
-    resolved: true,
-    marketId: map[leg.marketType]
-  };
+  const marketId = marketTable[leg.marketType];
+  if (!marketId) return { resolved: false };
+  return { resolved: true, marketId };
 }
 
 async function searchBetMGMOptions(fixtureId, marketId, leg) {
-  const bucket = getMockBetMGMOptions().find(m => m.marketId === marketId);
+  const bucket = getMockBetMGMOptions().find((o) => o.marketId === marketId);
   if (!bucket) return { resolved: false };
 
-  const option = bucket.options.find(o =>
-    clean(o.participant).toLowerCase() === clean(leg.participant).toLowerCase()
-  );
+  const option = bucket.options.find((o) => {
+    const sameParticipant =
+      clean(o.participant).toLowerCase() === clean(leg.participant).toLowerCase();
+    const sameLine =
+      !o.line || !leg.line || clean(o.line) === clean(leg.line);
+    return sameParticipant && sameLine;
+  });
 
   if (!option) return { resolved: false };
-
-  return {
-    resolved: true,
-    optionId: option.optionId
-  };
+  return { resolved: true, optionId: option.optionId };
 }
 
 async function resolveLeg(leg, oddsData = null) {
@@ -351,7 +360,8 @@ async function resolveLeg(leg, oddsData = null) {
       fixtureId: "NOT_FOUND",
       marketId: "NOT_FOUND",
       optionId: "NOT_FOUND",
-      resolverNote: fixture.reason
+      resolverNote: fixture.reason || "Fixture not found",
+      wantedTeams: fixture.wantedTeams || []
     };
   }
 
@@ -363,7 +373,9 @@ async function resolveLeg(leg, oddsData = null) {
       fixtureId: fixture.fixtureId,
       marketId: "NOT_FOUND",
       optionId: "NOT_FOUND",
-      resolverNote: "Market not found"
+      resolverNote: "Market not found",
+      wantedTeams: fixture.wantedTeams || [],
+      matchedTeams: fixture.matchedTeams || []
     };
   }
 
@@ -374,12 +386,12 @@ async function resolveLeg(leg, oddsData = null) {
     fixtureId: fixture.fixtureId,
     marketId: market.marketId,
     optionId: option.resolved ? option.optionId : "NOT_FOUND",
-    resolverNote: option.resolved ? "" : "Option not found"
+    resolverNote: option.resolved ? "" : "Option not found",
+    wantedTeams: fixture.wantedTeams || [],
+    matchedTeams: fixture.matchedTeams || []
   };
 }
-/* =========================
-   BUILDERS
-========================= */
+
 function buildBetMGMBetslip(resolvedLegs) {
   return {
     sportsbook: "BetMGM",
@@ -424,13 +436,18 @@ function buildBetslipMessage(betslip, deepLink) {
     lines.push("", "Deep link:", "", "Could not build link because one or more IDs were missing.");
   }
 
-  return lines.join("\\n");
+  return lines.join("\n");
 }
 
 function buildDebug(resolved) {
   return resolved
-    .map(
-      (l, i) => `${i + 1}. ${l.participant}
+    .map((l, i) => {
+      const extra =
+        l.fixtureId === "NOT_FOUND"
+          ? `\nwantedTeams: ${(l.wantedTeams || []).join(" | ") || "none"}`
+          : `\nwantedTeams: ${(l.wantedTeams || []).join(" | ") || "none"}\nmatchedTeams: ${(l.matchedTeams || []).join(" | ") || "none"}`;
+
+      return `${i + 1}. ${l.participant}
 event: ${l.event}
 market: ${l.rawMarket}
 marketType: ${l.marketType}
@@ -438,16 +455,16 @@ line: ${l.line}
 fixtureId: ${l.fixtureId}
 marketId: ${l.marketId}
 optionId: ${l.optionId}
-resolverNote: ${l.resolverNote || ""}`
-    )
-    .join("\\n\\n");
+resolverNote: ${l.resolverNote || ""}${extra}`;
+    })
+    .join("\n\n");
 }
 
 async function buildOddsLinesMessage() {
   const odds = await fetchOddsApiMLBEvents();
 
   if (!odds.success) {
-    return `Odds debug failed\\n${odds.error || "Unknown error"}`;
+    return `Odds debug failed\n${odds.error || "Unknown error"}`;
   }
 
   const lines = [
@@ -464,8 +481,43 @@ async function buildOddsLinesMessage() {
     lines.push("");
   }
 
-  return lines.join("\\n").slice(0, 1900);
+  return lines.join("\n").slice(0, 1900);
 }
+
+async function sendMessage(id, text) {
+  const chunks = splitIntoChunks(String(text || ""), 1800);
+
+  for (const chunk of chunks) {
+    const resp = await fetch(
+      `https://graph.facebook.com/v18.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          recipient: { id },
+          message: { text: chunk }
+        })
+      }
+    );
+
+    if (!resp.ok) {
+      const err = await resp.text().catch(() => "");
+      console.error("FB send error:", err);
+    }
+  }
+}
+
+app.get("/", (_req, res) => {
+  res.send("running");
+});
+
+app.get("/webhook", (req, res) => {
+  if (req.query["hub.verify_token"] === VERIFY_TOKEN) {
+    return res.send(req.query["hub.challenge"]);
+  }
+  res.sendStatus(403);
+});
+
 app.post("/webhook", async (req, res) => {
   try {
     const entries = req.body?.entry || [];
