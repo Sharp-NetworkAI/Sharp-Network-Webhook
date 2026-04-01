@@ -18,6 +18,9 @@ let oddsCache = {
 
 const ODDS_CACHE_TTL_MS = 60 * 1000;
 
+/* =========================
+   HELPERS
+========================= */
 function safeParseJSON(text) {
   try {
     return JSON.parse(text);
@@ -61,6 +64,9 @@ function splitIntoChunks(text, maxLen = 1800) {
   return chunks;
 }
 
+/* =========================
+   TEAM MATCHING
+========================= */
 function teamAliasMap() {
   return {
     "new york yankees": ["new york yankees", "yankees", "nyy"],
@@ -79,11 +85,11 @@ function teamAliasMap() {
     "minnesota twins": ["minnesota twins", "twins"],
     "houston astros": ["houston astros", "astros"],
     "los angeles angels": ["los angeles angels", "angels"],
-    "arizona diamondbacks": ["arizona diamondbacks", "diamondbacks", "dbacks"],
-    "washington nationals": ["washington nationals", "nationals", "nats"],
+    "arizona diamondbacks": ["arizona diamondbacks", "diamondbacks"],
+    "washington nationals": ["washington nationals", "nationals"],
     "seattle mariners": ["seattle mariners", "mariners"],
     "kansas city royals": ["kansas city royals", "royals"],
-    "toronto blue jays": ["toronto blue jays", "blue jays", "jays"],
+    "toronto blue jays": ["toronto blue jays", "blue jays"],
     "pittsburgh pirates": ["pittsburgh pirates", "pirates"],
     "tampa bay rays": ["tampa bay rays", "rays"],
     "texas rangers": ["texas rangers", "rangers"],
@@ -122,255 +128,68 @@ function extractTeamsFromLegEvent(eventText) {
   return [...new Set(matches)];
 }
 
-function normalizeMarketType(market = "") {
-  const m = clean(market).toLowerCase();
-
-  if (m.includes("home run")) return "player_home_run";
-  if (m.includes("total bases")) return "player_total_bases";
-  if (m.includes("moneyline")) return "moneyline";
-
-  return m;
-}
-
-function extractLine(market = "") {
-  const match = clean(market).match(/(\d+)\+/);
-  return match ? `${match[1]}+` : "";
-}
-
-function normalizeLeg(leg, fallbackEvent = "") {
-  return {
-    event: clean(leg.event || fallbackEvent),
-    participant: clean(leg.selection),
-    marketType: normalizeMarketType(leg.market),
-    line: extractLine(leg.market),
-    rawMarket: clean(leg.market)
-  };
-}
-
-function getMockBetMGMOptions() {
-  return [
-    {
-      marketId: "MGM_MARKET_HR",
-      options: [
-        { optionId: "MGM_OPTION_HELIOT_RAMOS_HR", participant: "Heliot Ramos" },
-        { optionId: "MGM_OPTION_AUSTIN_WELLS_HR", participant: "Austin Wells" },
-        { optionId: "MGM_OPTION_MICHAEL_BUSCH_HR", participant: "Michael Busch" },
-        { optionId: "MGM_OPTION_ELLY_DE_LA_CRUZ_HR", participant: "Elly De La Cruz" },
-        { optionId: "MGM_OPTION_RONALD_ACUNA_JR_HR", participant: "Ronald Acuna Jr." }
-      ]
-    },
-    {
-      marketId: "MGM_MARKET_TOTAL_BASES",
-      options: [
-        {
-          optionId: "MGM_OPTION_LUIS_ARRAEZ_TOTAL_BASES_2_PLUS",
-          participant: "Luis Arraez",
-          line: "2+"
-        }
-      ]
-    },
-    {
-      marketId: "MGM_MARKET_MONEYLINE",
-      options: [
-        { optionId: "MGM_OPTION_ORIOLES_ML", participant: "Baltimore Orioles" },
-        { optionId: "MGM_OPTION_WHITE_SOX_ML", participant: "Chicago White Sox" },
-        { optionId: "MGM_OPTION_PIRATES_ML", participant: "Pittsburgh Pirates" },
-        { optionId: "MGM_OPTION_PHILLIES_ML", participant: "Philadelphia Phillies" },
-        { optionId: "MGM_OPTION_BLUE_JAYS_ML", participant: "Toronto Blue Jays" },
-        { optionId: "MGM_OPTION_BRAVES_ML", participant: "Atlanta Braves" },
-        { optionId: "MGM_OPTION_CUBS_ML", participant: "Chicago Cubs" },
-        { optionId: "MGM_OPTION_BREWERS_ML", participant: "Milwaukee Brewers" },
-        { optionId: "MGM_OPTION_METS_ML", participant: "New York Mets" },
-        { optionId: "MGM_OPTION_ASTROS_ML", participant: "Houston Astros" },
-        { optionId: "MGM_OPTION_YANKEES_ML", participant: "New York Yankees" },
-        { optionId: "MGM_OPTION_GIANTS_ML", participant: "San Francisco Giants" },
-        { optionId: "MGM_OPTION_DODGERS_ML", participant: "Los Angeles Dodgers" },
-        { optionId: "MGM_OPTION_TWINS_ML", participant: "Minnesota Twins" },
-        { optionId: "MGM_OPTION_ROYALS_ML", participant: "Kansas City Royals" },
-        { optionId: "MGM_OPTION_RANGERS_ML", participant: "Texas Rangers" },
-        { optionId: "MGM_OPTION_MARLINS_ML", participant: "Miami Marlins" },
-        { optionId: "MGM_OPTION_REDS_ML", participant: "Cincinnati Reds" },
-        { optionId: "MGM_OPTION_NATIONALS_ML", participant: "Washington Nationals" },
-        { optionId: "MGM_OPTION_ROCKIES_ML", participant: "Colorado Rockies" },
-        { optionId: "MGM_OPTION_ATHLETICS_ML", participant: "Athletics" },
-        { optionId: "MGM_OPTION_ANGELS_ML", participant: "Los Angeles Angels" },
-        { optionId: "MGM_OPTION_RAYS_ML", participant: "Tampa Bay Rays" },
-        { optionId: "MGM_OPTION_CARDINALS_ML", participant: "St. Louis Cardinals" },
-        { optionId: "MGM_OPTION_RED_SOX_ML", participant: "Boston Red Sox" },
-        { optionId: "MGM_OPTION_MARINERS_ML", participant: "Seattle Mariners" },
-        { optionId: "MGM_OPTION_PADRES_ML", participant: "San Diego Padres" },
-        { optionId: "MGM_OPTION_GUARDIANS_ML", participant: "Cleveland Guardians" }
-      ]
-    }
-  ];
-}
-
+/* =========================
+   ODDS API
+========================= */
 async function fetchOddsApiMLBEvents() {
   const now = Date.now();
 
   if (oddsCache.data.length && now - oddsCache.fetchedAt < ODDS_CACHE_TTL_MS) {
-    return { success: true, error: null, data: oddsCache.data, cached: true };
-  }
-
-  if (!ODDS_API_KEY) {
-    return { success: false, error: "ODDS_API_KEY missing", data: [] };
+    return { success: true, data: oddsCache.data };
   }
 
   const url =
     `https://api.the-odds-api.com/v4/sports/baseball_mlb/odds` +
-    `?apiKey=${encodeURIComponent(ODDS_API_KEY)}` +
-    `&regions=us&markets=h2h&oddsFormat=american`;
+    `?apiKey=${ODDS_API_KEY}&regions=us&markets=h2h`;
 
   const resp = await fetch(url);
-  const data = await resp.json().catch(() => []);
+  const data = await resp.json();
 
-  if (!resp.ok) {
-    return {
-      success: false,
-      error: Array.isArray(data)
-        ? `The Odds API HTTP ${resp.status}`
-        : (data?.message || `The Odds API HTTP ${resp.status}`),
-      data: []
-    };
-  }
+  oddsCache = { fetchedAt: now, data };
 
-  oddsCache = {
-    fetchedAt: now,
-    data: Array.isArray(data) ? data : []
-  };
-
-  return {
-    success: true,
-    error: null,
-    data: oddsCache.data,
-    cached: false
-  };
+  return { success: true, data };
 }
 
-function extractEventTeamsFromOddsApiEvent(eventObj) {
-  const candidates = [eventObj.home_team, eventObj.away_team].filter(Boolean);
-  const found = [];
-
-  for (const candidate of candidates) {
-    const canonical = canonicalizeTeamName(candidate);
-    if (canonical) found.push(canonical);
-  }
-
-  return [...new Set(found)];
+function extractEventTeamsFromOddsApiEvent(e) {
+  return [
+    canonicalizeTeamName(e.home_team),
+    canonicalizeTeamName(e.away_team)
+  ].filter(Boolean);
 }
 
-async function searchBetMGMFixtures(leg, oddsData = null) {
+/* =========================
+   RESOLVER
+========================= */
+async function resolveLeg(leg, oddsData) {
   const wantedTeams = extractTeamsFromLegEvent(leg.event);
 
-  if (wantedTeams.length < 2) {
-    return {
-      resolved: false,
-      reason: "Could not identify both teams from parsed event",
-      wantedTeams
-    };
-  }
+  for (const event of oddsData.data) {
+    const teams = extractEventTeamsFromOddsApiEvent(event);
 
-  const odds = oddsData || await fetchOddsApiMLBEvents();
-
-  if (!odds.success) {
-    return {
-      resolved: false,
-      reason: odds.error || "The Odds API lookup failed",
-      wantedTeams
-    };
-  }
-
-  for (const eventObj of odds.data) {
-    const eventTeams = extractEventTeamsFromOddsApiEvent(eventObj);
-    const allMatched = wantedTeams.every((team) => eventTeams.includes(team));
-
-    if (allMatched) {
+    if (wantedTeams.every((t) => teams.includes(t))) {
       return {
-        resolved: true,
-        fixtureId: clean(eventObj.id || ""),
-        rawEvent: eventObj,
+        ...leg,
+        fixtureId: event.id,
+        marketId: "MGM_MARKET_MONEYLINE",
+        optionId: `MGM_OPTION_${leg.participant.toUpperCase().replace(/ /g, "_")}_ML`,
         wantedTeams,
-        matchedTeams: eventTeams
+        matchedTeams: teams
       };
     }
   }
 
   return {
-    resolved: false,
-    reason: "No live The Odds API event matched parsed teams",
+    ...leg,
+    fixtureId: "NOT_FOUND",
+    marketId: "NOT_FOUND",
+    optionId: "NOT_FOUND",
     wantedTeams
   };
 }
 
-async function searchBetMGMMarkets(fixtureId, leg) {
-  const marketTable = {
-    player_home_run: "MGM_MARKET_HR",
-    player_total_bases: "MGM_MARKET_TOTAL_BASES",
-    moneyline: "MGM_MARKET_MONEYLINE"
-  };
-
-  const marketId = marketTable[leg.marketType];
-  if (!marketId) return { resolved: false };
-  return { resolved: true, marketId };
-}
-
-async function searchBetMGMOptions(fixtureId, marketId, leg) {
-  const bucket = getMockBetMGMOptions().find((o) => o.marketId === marketId);
-  if (!bucket) return { resolved: false };
-
-  const option = bucket.options.find((o) => {
-    const sameParticipant =
-      clean(o.participant).toLowerCase() === clean(leg.participant).toLowerCase();
-    const sameLine =
-      !o.line || !leg.line || clean(o.line) === clean(leg.line);
-    return sameParticipant && sameLine;
-  });
-
-  if (!option) return { resolved: false };
-  return { resolved: true, optionId: option.optionId };
-}
-
-async function resolveLeg(leg, oddsData = null) {
-  const fixture = await searchBetMGMFixtures(leg, oddsData);
-
-  if (!fixture.resolved) {
-    return {
-      ...leg,
-      fixtureId: "NOT_FOUND",
-      marketId: "NOT_FOUND",
-      optionId: "NOT_FOUND",
-      resolverNote: fixture.reason || "Fixture not found",
-      wantedTeams: fixture.wantedTeams || []
-    };
-  }
-
-  const market = await searchBetMGMMarkets(fixture.fixtureId, leg);
-
-  if (!market.resolved) {
-    return {
-      ...leg,
-      fixtureId: fixture.fixtureId,
-      marketId: "NOT_FOUND",
-      optionId: "NOT_FOUND",
-      resolverNote: "Market not found",
-      wantedTeams: fixture.wantedTeams || [],
-      matchedTeams: fixture.matchedTeams || []
-    };
-  }
-
-  const option = await searchBetMGMOptions(fixture.fixtureId, market.marketId, leg);
-
-  return {
-    ...leg,
-    fixtureId: fixture.fixtureId,
-    marketId: market.marketId,
-    optionId: option.resolved ? option.optionId : "NOT_FOUND",
-    resolverNote: option.resolved ? "" : "Option not found",
-    wantedTeams: fixture.wantedTeams || [],
-    matchedTeams: fixture.matchedTeams || []
-  };
-}
-
+/* =========================
+   BUILDERS
+========================= */
 function buildBetMGMBetslip(resolvedLegs) {
   return {
     sportsbook: "BetMGM",
@@ -384,90 +203,25 @@ function buildBetMGMBetslip(resolvedLegs) {
 }
 
 function buildBetMGMDeepLink(resolvedLegs) {
-  const validLegs = resolvedLegs.filter(
-    (l) =>
-      l.fixtureId !== "NOT_FOUND" &&
-      l.marketId !== "NOT_FOUND" &&
-      l.optionId !== "NOT_FOUND"
-  );
+  const valid = resolvedLegs.filter((l) => l.fixtureId !== "NOT_FOUND");
 
-  if (!validLegs.length) return null;
+  if (!valid.length) return null;
 
-  const optionsString = validLegs
+  const str = valid
     .map((l) => `${l.fixtureId}-${l.marketId}-${l.optionId}`)
     .join(",");
 
-  return `https://sports.betmgm.com/en/sports?options=${encodeURIComponent(optionsString)}`;
+  return `https://sports.betmgm.com/en/sports?options=${encodeURIComponent(str)}`;
 }
 
-function buildBetslipMessage(betslip, deepLink) {
-  const lines = [
-    "🎯 BetMGM Slip Ready",
-    "",
-    "Copy payload:",
-    "",
-    JSON.stringify(betslip, null, 2)
-  ];
-
-  if (deepLink) {
-    lines.push("", "Deep link:", "", deepLink);
-  } else {
-    lines.push("", "Deep link:", "", "Could not build link because one or more IDs were missing.");
-  }
-
-  return lines.join("\n");
-}
-
-function buildDebug(resolved) {
-  return resolved
-    .map((l, i) => {
-      const extra =
-        l.fixtureId === "NOT_FOUND"
-          ? `\nwantedTeams: ${(l.wantedTeams || []).join(" | ") || "none"}`
-          : `\nwantedTeams: ${(l.wantedTeams || []).join(" | ") || "none"}\nmatchedTeams: ${(l.matchedTeams || []).join(" | ") || "none"}`;
-
-      return `${i + 1}. ${l.participant}
-event: ${l.event}
-market: ${l.rawMarket}
-marketType: ${l.marketType}
-line: ${l.line}
-fixtureId: ${l.fixtureId}
-marketId: ${l.marketId}
-optionId: ${l.optionId}
-resolverNote: ${l.resolverNote || ""}${extra}`;
-    })
-    .join("\n\n");
-}
-
-async function buildOddsLinesMessage() {
-  const odds = await fetchOddsApiMLBEvents();
-
-  if (!odds.success) {
-    return `Odds debug failed\n${odds.error || "Unknown error"}`;
-  }
-
-  const lines = [
-    "Odds lines",
-    `eventCount: ${odds.data.length}`,
-    `cached: ${odds.cached ? "yes" : "no"}`,
-    ""
-  ];
-
-  for (const eventObj of odds.data.slice(0, 10)) {
-    lines.push(`fixtureId: ${clean(eventObj.id)}`);
-    lines.push(`home: ${clean(eventObj.home_team) || "none"}`);
-    lines.push(`away: ${clean(eventObj.away_team) || "none"}`);
-    lines.push("");
-  }
-
-  return lines.join("\n").slice(0, 1900);
-}
-
+/* =========================
+   SEND
+========================= */
 async function sendMessage(id, text) {
-  const chunks = splitIntoChunks(String(text || ""), 1800);
+  const chunks = splitIntoChunks(text);
 
   for (const chunk of chunks) {
-    const resp = await fetch(
+    await fetch(
       `https://graph.facebook.com/v18.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`,
       {
         method: "POST",
@@ -478,151 +232,60 @@ async function sendMessage(id, text) {
         })
       }
     );
-
-    if (!resp.ok) {
-      const err = await resp.text().catch(() => "");
-      console.error("FB send error:", err);
-    }
   }
 }
 
-app.get("/", (_req, res) => {
-  res.send("running");
-});
-
-app.get("/webhook", (req, res) => {
-  if (req.query["hub.verify_token"] === VERIFY_TOKEN) {
-    return res.send(req.query["hub.challenge"]);
-  }
-  res.sendStatus(403);
-});
-
+/* =========================
+   ROUTES
+========================= */
 app.post("/webhook", async (req, res) => {
   try {
-    const entries = req.body?.entry || [];
+    const entry = req.body.entry || [];
 
-    for (const entry of entries) {
-      for (const event of entry.messaging || []) {
-        if (!event.message || event.message.is_echo) continue;
-        if (!event.sender || !event.sender.id) continue;
+    for (const e of entry) {
+      for (const m of e.messaging || []) {
 
-        const sender = event.sender.id;
-        const text = event.message?.text || "";
+        if (!m.message || m.message.is_echo) continue;
 
-        let imageUrl = null;
-        if (event.message.attachments) {
-          const img = event.message.attachments.find((a) => a.type === "image");
-          if (img && img.payload && img.payload.url) {
-            imageUrl = img.payload.url;
-          }
-        }
+        const sender = m.sender.id;
+        const text = m.message?.text || "";
 
-        if (imageUrl) {
-          const ai = await fetch("https://api.openai.com/v1/responses", {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${OPENAI_API_KEY}`,
-              "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-              model: "gpt-4.1-mini",
-              input: [
-                {
-                  role: "user",
-                  content: [
-                    {
-                      type: "input_text",
-                      text:
-                        'Return ONLY valid JSON. No explanation. No markdown. Format EXACTLY like this: {"bet_type":"","source_sportsbook":"","odds":"","stake":"","payout":"","event":"","legs":[{"event":"","market":"","selection":""}]}. IMPORTANT: include the full matchup for each leg event when visible, for example "Chicago Cubs @ Cincinnati Reds". If a leg event is missing, use the top-level event field as fallback.'
-                    },
-                    {
-                      type: "input_image",
-                      image_url: imageUrl
-                    }
-                  ]
-                }
-              ]
-            })
-          });
-
-          const data = await ai.json();
-          const raw = data.output?.[0]?.content?.[0]?.text || "";
-          const parsed = safeParseJSON(raw);
-
-          if (!parsed || !Array.isArray(parsed.legs) || !parsed.legs.length) {
-            await sendMessage(sender, "parse failed");
-            continue;
-          }
-
-          const fallbackEvent = clean(parsed.event);
-
-          userSlipStore[sender] = {
-            legs: parsed.legs.map((leg) => normalizeLeg(leg, fallbackEvent)),
-            resolved: null
-          };
-
-          await sendMessage(sender, "Slip copied ✅\n\nReply: BetMGM");
+        // ✅ RESET COMMAND
+        if (text.toLowerCase() === "reset") {
+          delete userSlipStore[sender];
+          await sendMessage(sender, "Session cleared ✅\nSend a new slip.");
           continue;
         }
 
         if (text.toLowerCase() === "betmgm") {
           const saved = userSlipStore[sender];
+          if (!saved) return;
 
-          if (!saved?.legs) {
-            await sendMessage(
-              sender,
-              "⚠️ Session expired.\n\nSend the slip image again, then reply BetMGM."
-            );
-            continue;
-          }
-
-          const oddsData = await fetchOddsApiMLBEvents();
+          const odds = await fetchOddsApiMLBEvents();
 
           const resolved = [];
           for (const leg of saved.legs) {
-            resolved.push(await resolveLeg(leg, oddsData));
+            resolved.push(await resolveLeg(leg, odds));
           }
 
-          userSlipStore[sender].resolved = resolved;
+          const slip = buildBetMGMBetslip(resolved);
+          const link = buildBetMGMDeepLink(resolved);
 
-          const betslip = buildBetMGMBetslip(resolved);
-          const deepLink = buildBetMGMDeepLink(resolved);
-
-          await sendMessage(sender, buildBetslipMessage(betslip, deepLink));
-          continue;
+          await sendMessage(
+            sender,
+            JSON.stringify(slip, null, 2) + "\n\n" + (link || "")
+          );
+        } else {
+          await sendMessage(sender, "Send slip image");
         }
-
-        if (text.toLowerCase() === "payload debug") {
-          const saved = userSlipStore[sender];
-
-          if (!saved?.resolved) {
-            await sendMessage(sender, "Run BetMGM first");
-            continue;
-          }
-
-          const debugText = buildDebug(saved.resolved);
-          await sendMessage(sender, debugText);
-          continue;
-        }
-
-        if (text.toLowerCase() === "odds lines") {
-          const msg = await buildOddsLinesMessage();
-          await sendMessage(sender, msg);
-          continue;
-        }
-
-        if (!text) continue;
-        await sendMessage(sender, "Send slip image");
       }
     }
 
     res.sendStatus(200);
-  } catch (err) {
-    console.error(err);
+  } catch (e) {
+    console.error(e);
     res.sendStatus(500);
   }
 });
 
-app.listen(PORT, () => {
-  console.log("running");
-});
+app.listen(PORT, () => console.log("running"));
