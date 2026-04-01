@@ -492,28 +492,25 @@ async function buildOddsLinesMessage() {
    SEND
 ========================= */
 async function sendMessage(id, text) {
-  const resp = await fetch(
-    `https://graph.facebook.com/v18.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        recipient: { id },
-        message: { text }
-      })
-    }
-  );
+  const chunks = splitIntoChunks(String(text || ""), 1800);
 
-  if (!resp.ok) {
-    const err = await resp.text().catch(() => "");
-    console.error("FB send error:", err);
-  }
-}
-
-async function sendLongMessage(id, text) {
-  const chunks = splitIntoChunks(text);
   for (const chunk of chunks) {
-    await sendMessage(id, chunk);
+    const resp = await fetch(
+      `https://graph.facebook.com/v18.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          recipient: { id },
+          message: { text: chunk }
+        })
+      }
+    );
+
+    if (!resp.ok) {
+      const err = await resp.text().catch(() => "");
+      console.error("FB send error:", err);
+    }
   }
 }
 
@@ -630,7 +627,7 @@ app.post("/webhook", async (req, res) => {
           }
 
           const debugText = buildDebug(saved.resolved);
-          await sendLongMessage(sender, debugText);
+          await sendMessage(sender, debugText);
           continue;
         }
 
