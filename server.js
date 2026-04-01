@@ -597,7 +597,10 @@ app.post("/webhook", async (req, res) => {
           const saved = userSlipStore[sender];
 
           if (!saved?.legs) {
-            await sendMessage(sender, "Send slip first");
+            await sendMessage(
+              sender,
+              "⚠️ Session expired.\n\nSend the slip image again, then reply BetMGM."
+            );
             continue;
           }
 
