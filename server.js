@@ -215,7 +215,7 @@ function getMockBetMGMOptions() {
 }
 
 /* =========================
-   ODDS API
+   ODDS API + RESOLVER
 ========================= */
 async function fetchOddsApiMLBEvents() {
   const now = Date.now();
@@ -261,9 +261,6 @@ function extractEventTeamsFromOddsApiEvent(eventObj) {
   return [...new Set(found)];
 }
 
-/* =========================
-   RESOLVER
-========================= */
 async function searchBetMGMFixtures(leg, oddsData = null) {
   const wantedTeams = extractTeamsFromLegEvent(leg.event);
 
@@ -377,7 +374,7 @@ async function resolveLeg(leg, oddsData = null) {
 }
 
 /* =========================
-   BUILDERS
+   BUILDERS + SEND
 ========================= */
 function buildBetMGMBetslip(resolvedLegs) {
   return {
@@ -429,6 +426,24 @@ resolverNote: ${l.resolverNote || ""}${extra}`;
     .join("\n\n");
 }
 
+function buildUnresolved(resolved) {
+  const failed = resolved.filter((l) => l.fixtureId === "NOT_FOUND");
+
+  if (!failed.length) {
+    return "All legs resolved ✅";
+  }
+
+  return failed
+    .map(
+      (l, i) => `${i + 1}. ${l.participant}
+event: ${l.event}
+market: ${l.rawMarket}
+resolverNote: ${l.resolverNote || ""}
+wantedTeams: ${(l.wantedTeams || []).join(" | ") || "none"}`
+    )
+    .join("\n\n");
+}
+
 async function buildOddsLinesMessage() {
   const odds = await fetchOddsApiMLBEvents();
 
@@ -453,9 +468,6 @@ async function buildOddsLinesMessage() {
   return lines.join("\n").slice(0, 1900);
 }
 
-/* =========================
-   SEND
-========================= */
 async function sendMessage(id, text) {
   const chunks = splitIntoChunks(String(text || ""), 1800);
 
@@ -588,15 +600,8 @@ app.post("/webhook", async (req, res) => {
           const total = resolved.length;
           const success = resolved.filter((l) => l.fixtureId !== "NOT_FOUND").length;
 
-          await sendMessage(
-            sender,
-            `BetMGM ready ✅\nResolved: ${success}/${total}`
-          );
-
-          await sendMessage(
-            sender,
-            JSON.stringify(slip, null, 2)
-          );
+          await sendMessage(sender, `BetMGM ready ✅\nResolved: ${success}/${total}`);
+          await sendMessage(sender, JSON.stringify(slip, null, 2));
 
           if (link) {
             await sendMessage(sender, link);
@@ -612,8 +617,19 @@ app.post("/webhook", async (req, res) => {
             continue;
           }
 
-          const debugText = buildDebug(saved.resolved);
-          await sendMessage(sender, debugText);
+          await sendMessage(sender, buildDebug(saved.resolved));
+          continue;
+        }
+
+        if (text.toLowerCase() === "unresolved") {
+          const saved = userSlipStore[sender];
+
+          if (!saved?.resolved) {
+            await sendMessage(sender, "Run BetMGM first");
+            continue;
+          }
+
+          await sendMessage(sender, buildUnresolved(saved.resolved));
           continue;
         }
 
