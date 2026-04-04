@@ -77,6 +77,7 @@ function teamAliasMap() {
     "cincinnati reds": ["cincinnati reds", "reds"],
     "milwaukee brewers": ["milwaukee brewers", "brewers"],
     "st. louis cardinals": ["st louis cardinals", "st. louis cardinals", "cardinals"],
+    "detroit tigers": ["detroit tigers", "tigers"],
     "new york mets": ["new york mets", "mets"],
     "philadelphia phillies": ["philadelphia phillies", "phillies"],
     "boston red sox": ["boston red sox", "red sox"],
@@ -205,6 +206,7 @@ function getMockBetMGMOptions() {
         { optionId: "MGM_OPTION_ANGELS_ML", participant: "Los Angeles Angels" },
         { optionId: "MGM_OPTION_RAYS_ML", participant: "Tampa Bay Rays" },
         { optionId: "MGM_OPTION_CARDINALS_ML", participant: "St. Louis Cardinals" },
+        { optionId: "MGM_OPTION_TIGERS_ML", participant: "Detroit Tigers" },
         { optionId: "MGM_OPTION_RED_SOX_ML", participant: "Boston Red Sox" },
         { optionId: "MGM_OPTION_MARINERS_ML", participant: "Seattle Mariners" },
         { optionId: "MGM_OPTION_PADRES_ML", participant: "San Diego Padres" },
@@ -215,7 +217,7 @@ function getMockBetMGMOptions() {
 }
 
 /* =========================
-   ODDS API + RESOLVER
+   ODDS API
 ========================= */
 async function fetchOddsApiMLBEvents() {
   const now = Date.now();
@@ -261,6 +263,9 @@ function extractEventTeamsFromOddsApiEvent(eventObj) {
   return [...new Set(found)];
 }
 
+/* =========================
+   RESOLVER
+========================= */
 async function searchBetMGMFixtures(leg, oddsData = null) {
   const wantedTeams = extractTeamsFromLegEvent(leg.event);
 
@@ -374,7 +379,7 @@ async function resolveLeg(leg, oddsData = null) {
 }
 
 /* =========================
-   BUILDERS + SEND
+   BUILDERS
 ========================= */
 function buildBetMGMBetslip(resolvedLegs) {
   return {
@@ -468,6 +473,9 @@ async function buildOddsLinesMessage() {
   return lines.join("\n").slice(0, 1900);
 }
 
+/* =========================
+   SEND
+========================= */
 async function sendMessage(id, text) {
   const chunks = splitIntoChunks(String(text || ""), 1800);
 
