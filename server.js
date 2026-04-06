@@ -108,7 +108,36 @@ function teamAliasMap() {
   };
 }
 
-function moneylineOptionIdMap() {
+function canonicalizeTeamName(text) {
+  const aliases = teamAliasMap();
+
+  for (const [canonical, names] of Object.entries(aliases)) {
+    if (names.some((name) => containsAliasPhrase(text, name))) {
+      return canonical;
+    }
+  }
+
+  return "";
+}
+
+function extractTeamsFromLegEvent(eventText) {
+  const text = stripPitchers(eventText);
+  const aliases = teamAliasMap();
+  const matches = [];
+
+  for (const [canonical, names] of Object.entries(aliases)) {
+    if (names.some((name) => containsAliasPhrase(text, name))) {
+      matches.push(canonical);
+    }
+  }
+
+  return [...new Set(matches)];
+}
+
+/* =========================
+   OPTION MAPS
+========================= */
+function betmgmMoneylineOptionIdMap() {
   return {
     "baltimore orioles": "MGM_OPTION_ORIOLES_ML",
     "chicago white sox": "MGM_OPTION_WHITE_SOX_ML",
@@ -143,32 +172,79 @@ function moneylineOptionIdMap() {
   };
 }
 
-function canonicalizeTeamName(text) {
-  const aliases = teamAliasMap();
-
-  for (const [canonical, names] of Object.entries(aliases)) {
-    if (names.some((name) => containsAliasPhrase(text, name))) {
-      return canonical;
-    }
-  }
-
-  return "";
+function fanduelMoneylineSelectionMap() {
+  return {
+    "baltimore orioles": "Baltimore Orioles",
+    "chicago white sox": "Chicago White Sox",
+    "pittsburgh pirates": "Pittsburgh Pirates",
+    "philadelphia phillies": "Philadelphia Phillies",
+    "toronto blue jays": "Toronto Blue Jays",
+    "atlanta braves": "Atlanta Braves",
+    "chicago cubs": "Chicago Cubs",
+    "milwaukee brewers": "Milwaukee Brewers",
+    "new york mets": "New York Mets",
+    "houston astros": "Houston Astros",
+    "new york yankees": "New York Yankees",
+    "san francisco giants": "San Francisco Giants",
+    "los angeles dodgers": "Los Angeles Dodgers",
+    "minnesota twins": "Minnesota Twins",
+    "kansas city royals": "Kansas City Royals",
+    "texas rangers": "Texas Rangers",
+    "miami marlins": "Miami Marlins",
+    "cincinnati reds": "Cincinnati Reds",
+    "washington nationals": "Washington Nationals",
+    "colorado rockies": "Colorado Rockies",
+    "athletics": "Athletics",
+    "los angeles angels": "Los Angeles Angels",
+    "tampa bay rays": "Tampa Bay Rays",
+    "st. louis cardinals": "St. Louis Cardinals",
+    "detroit tigers": "Detroit Tigers",
+    "boston red sox": "Boston Red Sox",
+    "seattle mariners": "Seattle Mariners",
+    "san diego padres": "San Diego Padres",
+    "cleveland guardians": "Cleveland Guardians",
+    "arizona diamondbacks": "Arizona Diamondbacks"
+  };
 }
 
-function extractTeamsFromLegEvent(eventText) {
-  const text = stripPitchers(eventText);
-  const aliases = teamAliasMap();
-  const matches = [];
-
-  for (const [canonical, names] of Object.entries(aliases)) {
-    if (names.some((name) => containsAliasPhrase(text, name))) {
-      matches.push(canonical);
-    }
-  }
-
-  return [...new Set(matches)];
+function draftkingsMoneylineSelectionMap() {
+  return {
+    "baltimore orioles": "Baltimore Orioles",
+    "chicago white sox": "Chicago White Sox",
+    "pittsburgh pirates": "Pittsburgh Pirates",
+    "philadelphia phillies": "Philadelphia Phillies",
+    "toronto blue jays": "Toronto Blue Jays",
+    "atlanta braves": "Atlanta Braves",
+    "chicago cubs": "Chicago Cubs",
+    "milwaukee brewers": "Milwaukee Brewers",
+    "new york mets": "New York Mets",
+    "houston astros": "Houston Astros",
+    "new york yankees": "New York Yankees",
+    "san francisco giants": "San Francisco Giants",
+    "los angeles dodgers": "Los Angeles Dodgers",
+    "minnesota twins": "Minnesota Twins",
+    "kansas city royals": "Kansas City Royals",
+    "texas rangers": "Texas Rangers",
+    "miami marlins": "Miami Marlins",
+    "cincinnati reds": "Cincinnati Reds",
+    "washington nationals": "Washington Nationals",
+    "colorado rockies": "Colorado Rockies",
+    "athletics": "Athletics",
+    "los angeles angels": "Los Angeles Angels",
+    "tampa bay rays": "Tampa Bay Rays",
+    "st. louis cardinals": "St. Louis Cardinals",
+    "detroit tigers": "Detroit Tigers",
+    "boston red sox": "Boston Red Sox",
+    "seattle mariners": "Seattle Mariners",
+    "san diego padres": "San Diego Padres",
+    "cleveland guardians": "Cleveland Guardians",
+    "arizona diamondbacks": "Arizona Diamondbacks"
+  };
 }
 
+/* =========================
+   LEG NORMALIZATION
+========================= */
 function normalizeMarketType(market = "") {
   const m = clean(market).toLowerCase();
 
@@ -360,22 +436,15 @@ async function searchBetMGMMarkets(_fixtureId, leg) {
   return { resolved: true, marketId };
 }
 
-function resolveMoneylineOptionId(leg) {
-  const canonical = canonicalizeTeamName(leg.participant);
-  if (!canonical) return null;
-
-  return moneylineOptionIdMap()[canonical] || null;
-}
-
-async function searchBetMGMOptions(_fixtureId, marketId, leg) {
+function resolveBetMGMOptionId(leg, marketId) {
   if (marketId === "MGM_MARKET_MONEYLINE") {
-    const optionId = resolveMoneylineOptionId(leg);
-    if (!optionId) return { resolved: false };
-    return { resolved: true, optionId };
+    const canonical = canonicalizeTeamName(leg.participant);
+    if (!canonical) return null;
+    return betmgmMoneylineOptionIdMap()[canonical] || null;
   }
 
   const bucket = getMockBetMGMOptions().find((o) => o.marketId === marketId);
-  if (!bucket) return { resolved: false };
+  if (!bucket) return null;
 
   const option = bucket.options.find((o) => {
     const sameParticipant =
@@ -387,8 +456,7 @@ async function searchBetMGMOptions(_fixtureId, marketId, leg) {
     return sameParticipant && sameLine;
   });
 
-  if (!option) return { resolved: false };
-  return { resolved: true, optionId: option.optionId };
+  return option?.optionId || null;
 }
 
 async function resolveLeg(leg, oddsData = null) {
@@ -420,22 +488,34 @@ async function resolveLeg(leg, oddsData = null) {
     };
   }
 
-  const option = await searchBetMGMOptions(fixture.fixtureId, market.marketId, leg);
+  const optionId = resolveBetMGMOptionId(leg, market.marketId);
 
   return {
     ...leg,
     fixtureId: fixture.fixtureId,
     marketId: market.marketId,
-    optionId: option.resolved ? option.optionId : "NOT_FOUND",
-    resolverNote: option.resolved ? "" : "Option not found",
+    optionId: optionId || "NOT_FOUND",
+    resolverNote: optionId ? "" : "Option not found",
     wantedTeams: fixture.wantedTeams || [],
     matchedTeams: fixture.matchedTeams || []
   };
 }
 
 /* =========================
-   BUILDERS
+   BOOK BUILDERS
 ========================= */
+function getResolvedSuccessCounts(resolvedLegs) {
+  const total = resolvedLegs.length;
+  const success = resolvedLegs.filter(
+    (l) =>
+      l.fixtureId !== "NOT_FOUND" &&
+      l.marketId !== "NOT_FOUND" &&
+      l.optionId !== "NOT_FOUND"
+  ).length;
+
+  return { success, total };
+}
+
 function buildBetMGMBetslip(resolvedLegs) {
   return {
     sportsbook: "BetMGM",
@@ -465,11 +545,90 @@ function buildBetMGMDeepLink(resolvedLegs) {
   return `https://sports.betmgm.com/en/sports?options=${encodeURIComponent(str)}`;
 }
 
-function buildLinkOnly(resolvedLegs) {
-  const link = buildBetMGMDeepLink(resolvedLegs);
-  return link || "No deep link available yet.";
+function buildFanDuelPayload(resolvedLegs) {
+  const selectionMap = fanduelMoneylineSelectionMap();
+
+  return {
+    sportsbook: "FanDuel",
+    type: "same_game_parlay",
+    supported: resolvedLegs.every((l) => l.marketType === "moneyline"),
+    note: "Structured replication payload only. Live FanDuel deep link not yet wired.",
+    legs: resolvedLegs.map((l) => {
+      const canonical = canonicalizeTeamName(l.participant);
+      return {
+        event: l.event,
+        market: l.marketType,
+        selection: selectionMap[canonical] || l.rawSelection || l.participant
+      };
+    })
+  };
 }
 
+function buildDraftKingsPayload(resolvedLegs) {
+  const selectionMap = draftkingsMoneylineSelectionMap();
+
+  return {
+    sportsbook: "DraftKings",
+    type: "sgp",
+    supported: resolvedLegs.every((l) => l.marketType === "moneyline"),
+    note: "Structured replication payload only. Live DraftKings deep link not yet wired.",
+    legs: resolvedLegs.map((l) => {
+      const canonical = canonicalizeTeamName(l.participant);
+      return {
+        event: l.event,
+        market: l.marketType,
+        selection: selectionMap[canonical] || l.rawSelection || l.participant
+      };
+    })
+  };
+}
+
+function buildFanDuelGuide(resolvedLegs) {
+  const lines = ["FanDuel copy guide"];
+  resolvedLegs.forEach((l, i) => {
+    lines.push(`${i + 1}. ${l.rawSelection || l.participant}`);
+    lines.push(`   Event: ${l.event}`);
+    lines.push(`   Market: Moneyline`);
+  });
+  return lines.join("\n");
+}
+
+function buildDraftKingsGuide(resolvedLegs) {
+  const lines = ["DraftKings copy guide"];
+  resolvedLegs.forEach((l, i) => {
+    lines.push(`${i + 1}. ${l.rawSelection || l.participant}`);
+    lines.push(`   Event: ${l.event}`);
+    lines.push(`   Market: Moneyline`);
+  });
+  return lines.join("\n");
+}
+
+function buildMultiBookSummary(resolvedLegs) {
+  const { success, total } = getResolvedSuccessCounts(resolvedLegs);
+
+  const lines = [
+    "Multi-book ready ✅",
+    `Resolved: ${success}/${total}`,
+    "",
+    "Available outputs:",
+    "- BetMGM: real deep link",
+    "- FanDuel: structured payload + copy guide",
+    "- DraftKings: structured payload + copy guide",
+    "",
+    'Reply with: "BetMGM", "FanDuel", or "DraftKings"'
+  ];
+
+  return lines.join("\n");
+}
+
+function buildLinkOnly(resolvedLegs) {
+  const link = buildBetMGMDeepLink(resolvedLegs);
+  return link || "No BetMGM deep link available yet.";
+}
+
+/* =========================
+   DEBUG BUILDERS
+========================= */
 function buildDebug(resolved) {
   return resolved
     .map((l, i) => {
@@ -577,6 +736,31 @@ async function sendMessage(id, text) {
 }
 
 /* =========================
+   RESOLUTION CACHE
+========================= */
+async function resolveSavedSlipForUser(sender) {
+  const saved = userSlipStore[sender];
+
+  if (!saved?.legs) {
+    return { ok: false, reason: "⚠️ Session expired.\n\nSend the slip image again first." };
+  }
+
+  if (saved.resolved?.length) {
+    return { ok: true, resolved: saved.resolved };
+  }
+
+  const odds = await fetchOddsApiMLBEvents();
+  const resolved = [];
+
+  for (const leg of saved.legs) {
+    resolved.push(await resolveLeg(leg, odds));
+  }
+
+  userSlipStore[sender].resolved = resolved;
+  return { ok: true, resolved };
+}
+
+/* =========================
    ROUTES
 ========================= */
 app.get("/", (_req, res) => {
@@ -665,40 +849,22 @@ app.post("/webhook", async (req, res) => {
             resolved: null
           };
 
-          await sendMessage(sender, "Slip copied ✅\n\nReply BetMGM");
+          await sendMessage(sender, "Slip copied ✅\n\nReply BetMGM, FanDuel, DraftKings, or all books");
           continue;
         }
 
         if (lower === "betmgm") {
-          const saved = userSlipStore[sender];
+          const result = await resolveSavedSlipForUser(sender);
 
-          if (!saved?.legs) {
-            await sendMessage(
-              sender,
-              "⚠️ Session expired.\n\nSend the slip image again first."
-            );
+          if (!result.ok) {
+            await sendMessage(sender, result.reason);
             continue;
           }
 
-          const odds = await fetchOddsApiMLBEvents();
-          const resolved = [];
-
-          for (const leg of saved.legs) {
-            resolved.push(await resolveLeg(leg, odds));
-          }
-
-          userSlipStore[sender].resolved = resolved;
-
+          const resolved = result.resolved;
           const slip = buildBetMGMBetslip(resolved);
           const link = buildBetMGMDeepLink(resolved);
-
-          const total = resolved.length;
-          const success = resolved.filter(
-            (l) =>
-              l.fixtureId !== "NOT_FOUND" &&
-              l.marketId !== "NOT_FOUND" &&
-              l.optionId !== "NOT_FOUND"
-          ).length;
+          const { success, total } = getResolvedSuccessCounts(resolved);
 
           await sendMessage(sender, `BetMGM ready ✅\nResolved: ${success}/${total}`);
           await sendMessage(sender, JSON.stringify(slip, null, 2));
@@ -709,11 +875,76 @@ app.post("/webhook", async (req, res) => {
           continue;
         }
 
+        if (lower === "fanduel") {
+          const result = await resolveSavedSlipForUser(sender);
+
+          if (!result.ok) {
+            await sendMessage(sender, result.reason);
+            continue;
+          }
+
+          const resolved = result.resolved;
+          const payload = buildFanDuelPayload(resolved);
+          const guide = buildFanDuelGuide(resolved);
+
+          await sendMessage(sender, "FanDuel ready ✅");
+          await sendMessage(sender, JSON.stringify(payload, null, 2));
+          await sendMessage(sender, guide);
+          continue;
+        }
+
+        if (lower === "draftkings") {
+          const result = await resolveSavedSlipForUser(sender);
+
+          if (!result.ok) {
+            await sendMessage(sender, result.reason);
+            continue;
+          }
+
+          const resolved = result.resolved;
+          const payload = buildDraftKingsPayload(resolved);
+          const guide = buildDraftKingsGuide(resolved);
+
+          await sendMessage(sender, "DraftKings ready ✅");
+          await sendMessage(sender, JSON.stringify(payload, null, 2));
+          await sendMessage(sender, guide);
+          continue;
+        }
+
+        if (lower === "all books") {
+          const result = await resolveSavedSlipForUser(sender);
+
+          if (!result.ok) {
+            await sendMessage(sender, result.reason);
+            continue;
+          }
+
+          const resolved = result.resolved;
+          await sendMessage(sender, buildMultiBookSummary(resolved));
+
+          const betmgmSlip = buildBetMGMBetslip(resolved);
+          const betmgmLink = buildBetMGMDeepLink(resolved);
+          await sendMessage(sender, "BetMGM");
+          await sendMessage(sender, JSON.stringify(betmgmSlip, null, 2));
+          if (betmgmLink) {
+            await sendMessage(sender, betmgmLink);
+          }
+
+          const fanduelPayload = buildFanDuelPayload(resolved);
+          await sendMessage(sender, "FanDuel");
+          await sendMessage(sender, JSON.stringify(fanduelPayload, null, 2));
+
+          const draftkingsPayload = buildDraftKingsPayload(resolved);
+          await sendMessage(sender, "DraftKings");
+          await sendMessage(sender, JSON.stringify(draftkingsPayload, null, 2));
+          continue;
+        }
+
         if (lower === "payload debug") {
           const saved = userSlipStore[sender];
 
           if (!saved?.resolved) {
-            await sendMessage(sender, "Run BetMGM first");
+            await sendMessage(sender, "Run BetMGM, FanDuel, DraftKings, or all books first");
             continue;
           }
 
@@ -725,7 +956,7 @@ app.post("/webhook", async (req, res) => {
           const saved = userSlipStore[sender];
 
           if (!saved?.resolved) {
-            await sendMessage(sender, "Run BetMGM first");
+            await sendMessage(sender, "Run BetMGM, FanDuel, DraftKings, or all books first");
             continue;
           }
 
@@ -767,7 +998,7 @@ app.post("/webhook", async (req, res) => {
 
         await sendMessage(
           sender,
-          'Send slip image, then reply "BetMGM".\nOther commands: deep link, unresolved, payload debug, slip debug, reset'
+          'Send slip image, then reply "BetMGM", "FanDuel", "DraftKings", or "all books".\nOther commands: deep link, unresolved, payload debug, slip debug, reset'
         );
       }
     }
