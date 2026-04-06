@@ -172,76 +172,6 @@ function betmgmMoneylineOptionIdMap() {
   };
 }
 
-function fanduelMoneylineSelectionMap() {
-  return {
-    "baltimore orioles": "Baltimore Orioles",
-    "chicago white sox": "Chicago White Sox",
-    "pittsburgh pirates": "Pittsburgh Pirates",
-    "philadelphia phillies": "Philadelphia Phillies",
-    "toronto blue jays": "Toronto Blue Jays",
-    "atlanta braves": "Atlanta Braves",
-    "chicago cubs": "Chicago Cubs",
-    "milwaukee brewers": "Milwaukee Brewers",
-    "new york mets": "New York Mets",
-    "houston astros": "Houston Astros",
-    "new york yankees": "New York Yankees",
-    "san francisco giants": "San Francisco Giants",
-    "los angeles dodgers": "Los Angeles Dodgers",
-    "minnesota twins": "Minnesota Twins",
-    "kansas city royals": "Kansas City Royals",
-    "texas rangers": "Texas Rangers",
-    "miami marlins": "Miami Marlins",
-    "cincinnati reds": "Cincinnati Reds",
-    "washington nationals": "Washington Nationals",
-    "colorado rockies": "Colorado Rockies",
-    "athletics": "Athletics",
-    "los angeles angels": "Los Angeles Angels",
-    "tampa bay rays": "Tampa Bay Rays",
-    "st. louis cardinals": "St. Louis Cardinals",
-    "detroit tigers": "Detroit Tigers",
-    "boston red sox": "Boston Red Sox",
-    "seattle mariners": "Seattle Mariners",
-    "san diego padres": "San Diego Padres",
-    "cleveland guardians": "Cleveland Guardians",
-    "arizona diamondbacks": "Arizona Diamondbacks"
-  };
-}
-
-function draftkingsMoneylineSelectionMap() {
-  return {
-    "baltimore orioles": "Baltimore Orioles",
-    "chicago white sox": "Chicago White Sox",
-    "pittsburgh pirates": "Pittsburgh Pirates",
-    "philadelphia phillies": "Philadelphia Phillies",
-    "toronto blue jays": "Toronto Blue Jays",
-    "atlanta braves": "Atlanta Braves",
-    "chicago cubs": "Chicago Cubs",
-    "milwaukee brewers": "Milwaukee Brewers",
-    "new york mets": "New York Mets",
-    "houston astros": "Houston Astros",
-    "new york yankees": "New York Yankees",
-    "san francisco giants": "San Francisco Giants",
-    "los angeles dodgers": "Los Angeles Dodgers",
-    "minnesota twins": "Minnesota Twins",
-    "kansas city royals": "Kansas City Royals",
-    "texas rangers": "Texas Rangers",
-    "miami marlins": "Miami Marlins",
-    "cincinnati reds": "Cincinnati Reds",
-    "washington nationals": "Washington Nationals",
-    "colorado rockies": "Colorado Rockies",
-    "athletics": "Athletics",
-    "los angeles angels": "Los Angeles Angels",
-    "tampa bay rays": "Tampa Bay Rays",
-    "st. louis cardinals": "St. Louis Cardinals",
-    "detroit tigers": "Detroit Tigers",
-    "boston red sox": "Boston Red Sox",
-    "seattle mariners": "Seattle Mariners",
-    "san diego padres": "San Diego Padres",
-    "cleveland guardians": "Cleveland Guardians",
-    "arizona diamondbacks": "Arizona Diamondbacks"
-  };
-}
-
 /* =========================
    LEG NORMALIZATION
 ========================= */
@@ -545,60 +475,18 @@ function buildBetMGMDeepLink(resolvedLegs) {
   return `https://sports.betmgm.com/en/sports?options=${encodeURIComponent(str)}`;
 }
 
-function buildFanDuelPayload(resolvedLegs) {
-  const selectionMap = fanduelMoneylineSelectionMap();
-
-  return {
-    sportsbook: "FanDuel",
-    type: "same_game_parlay",
-    supported: resolvedLegs.every((l) => l.marketType === "moneyline"),
-    note: "Structured replication payload only. Live FanDuel deep link not yet wired.",
-    legs: resolvedLegs.map((l) => {
-      const canonical = canonicalizeTeamName(l.participant);
-      return {
-        event: l.event,
-        market: l.marketType,
-        selection: selectionMap[canonical] || l.rawSelection || l.participant
-      };
-    })
-  };
-}
-
-function buildDraftKingsPayload(resolvedLegs) {
-  const selectionMap = draftkingsMoneylineSelectionMap();
-
-  return {
-    sportsbook: "DraftKings",
-    type: "sgp",
-    supported: resolvedLegs.every((l) => l.marketType === "moneyline"),
-    note: "Structured replication payload only. Live DraftKings deep link not yet wired.",
-    legs: resolvedLegs.map((l) => {
-      const canonical = canonicalizeTeamName(l.participant);
-      return {
-        event: l.event,
-        market: l.marketType,
-        selection: selectionMap[canonical] || l.rawSelection || l.participant
-      };
-    })
-  };
-}
-
-function buildFanDuelGuide(resolvedLegs) {
-  const lines = ["FanDuel copy guide"];
+function buildFanDuelCopyList(resolvedLegs) {
+  const lines = ["FanDuel ready ✅", "", "Copy this:"];
   resolvedLegs.forEach((l, i) => {
-    lines.push(`${i + 1}. ${l.rawSelection || l.participant}`);
-    lines.push(`   Event: ${l.event}`);
-    lines.push(`   Market: Moneyline`);
+    lines.push(`${i + 1}. ${l.rawSelection || l.participant} ML`);
   });
   return lines.join("\n");
 }
 
-function buildDraftKingsGuide(resolvedLegs) {
-  const lines = ["DraftKings copy guide"];
+function buildDraftKingsCopyList(resolvedLegs) {
+  const lines = ["DraftKings ready ✅", "", "Copy this:"];
   resolvedLegs.forEach((l, i) => {
-    lines.push(`${i + 1}. ${l.rawSelection || l.participant}`);
-    lines.push(`   Event: ${l.event}`);
-    lines.push(`   Market: Moneyline`);
+    lines.push(`${i + 1}. ${l.rawSelection || l.participant} ML`);
   });
   return lines.join("\n");
 }
@@ -606,19 +494,15 @@ function buildDraftKingsGuide(resolvedLegs) {
 function buildMultiBookSummary(resolvedLegs) {
   const { success, total } = getResolvedSuccessCounts(resolvedLegs);
 
-  const lines = [
+  return [
     "Multi-book ready ✅",
     `Resolved: ${success}/${total}`,
     "",
-    "Available outputs:",
-    "- BetMGM: real deep link",
-    "- FanDuel: structured payload + copy guide",
-    "- DraftKings: structured payload + copy guide",
+    "BetMGM link below 👇",
     "",
-    'Reply with: "BetMGM", "FanDuel", or "DraftKings"'
-  ];
-
-  return lines.join("\n");
+    'FanDuel + DraftKings ready.',
+    'Reply "FanDuel" or "DraftKings" to copy.'
+  ].join("\n");
 }
 
 function buildLinkOnly(resolvedLegs) {
@@ -849,7 +733,7 @@ app.post("/webhook", async (req, res) => {
             resolved: null
           };
 
-          await sendMessage(sender, "Slip copied ✅\n\nReply BetMGM, FanDuel, DraftKings, or all books");
+          await sendMessage(sender, 'Slip copied ✅\n\nReply BetMGM, FanDuel, DraftKings, or all books');
           continue;
         }
 
@@ -862,16 +746,15 @@ app.post("/webhook", async (req, res) => {
           }
 
           const resolved = result.resolved;
-          const slip = buildBetMGMBetslip(resolved);
           const link = buildBetMGMDeepLink(resolved);
           const { success, total } = getResolvedSuccessCounts(resolved);
 
           await sendMessage(sender, `BetMGM ready ✅\nResolved: ${success}/${total}`);
-          await sendMessage(sender, JSON.stringify(slip, null, 2));
 
           if (link) {
             await sendMessage(sender, link);
           }
+
           continue;
         }
 
@@ -884,12 +767,7 @@ app.post("/webhook", async (req, res) => {
           }
 
           const resolved = result.resolved;
-          const payload = buildFanDuelPayload(resolved);
-          const guide = buildFanDuelGuide(resolved);
-
-          await sendMessage(sender, "FanDuel ready ✅");
-          await sendMessage(sender, JSON.stringify(payload, null, 2));
-          await sendMessage(sender, guide);
+          await sendMessage(sender, buildFanDuelCopyList(resolved));
           continue;
         }
 
@@ -902,12 +780,7 @@ app.post("/webhook", async (req, res) => {
           }
 
           const resolved = result.resolved;
-          const payload = buildDraftKingsPayload(resolved);
-          const guide = buildDraftKingsGuide(resolved);
-
-          await sendMessage(sender, "DraftKings ready ✅");
-          await sendMessage(sender, JSON.stringify(payload, null, 2));
-          await sendMessage(sender, guide);
+          await sendMessage(sender, buildDraftKingsCopyList(resolved));
           continue;
         }
 
@@ -920,23 +793,14 @@ app.post("/webhook", async (req, res) => {
           }
 
           const resolved = result.resolved;
+          const link = buildBetMGMDeepLink(resolved);
+
           await sendMessage(sender, buildMultiBookSummary(resolved));
 
-          const betmgmSlip = buildBetMGMBetslip(resolved);
-          const betmgmLink = buildBetMGMDeepLink(resolved);
-          await sendMessage(sender, "BetMGM");
-          await sendMessage(sender, JSON.stringify(betmgmSlip, null, 2));
-          if (betmgmLink) {
-            await sendMessage(sender, betmgmLink);
+          if (link) {
+            await sendMessage(sender, link);
           }
 
-          const fanduelPayload = buildFanDuelPayload(resolved);
-          await sendMessage(sender, "FanDuel");
-          await sendMessage(sender, JSON.stringify(fanduelPayload, null, 2));
-
-          const draftkingsPayload = buildDraftKingsPayload(resolved);
-          await sendMessage(sender, "DraftKings");
-          await sendMessage(sender, JSON.stringify(draftkingsPayload, null, 2));
           continue;
         }
 
