@@ -1,1 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Slip</title>
 
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #0b0b0f;
+      color: #fff;
+      padding: 20px;
+    }
+
+    .wrap {
+      max-width: 600px;
+      margin: 0 auto;
+    }
+
+    .card {
+      background: #17171c;
+      border-radius: 16px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+
+    h1 {
+      margin: 0 0 10px 0;
+    }
+
+    .leg {
+      padding: 10px 0;
+      border-bottom: 1px solid #2a2a34;
+    }
+
+    .leg:last-child {
+      border-bottom: none;
+    }
+
+    .btn {
+      display: block;
+      width: 100%;
+      padding: 14px;
+      border-radius: 12px;
+      background: #2a6df4;
+      color: white;
+      text-align: center;
+      font-weight: bold;
+      margin-top: 10px;
+      text-decoration: none;
+    }
+
+    .btn.secondary {
+      background: #2a2a34;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+
+    <div class="card">
+      <h1>Slip copied ✅</h1>
+      <p>Select a sportsbook:</p>
+    </div>
+
+    <div class="card">
+      <h2>Legs</h2>
+      <div id="legs"></div>
+    </div>
+
+    <div class="card">
+      <a id="betmgm" class="btn" target="_blank">Open in BetMGM</a>
+      <a class="btn secondary">FanDuel (coming soon)</a>
+      <a class="btn secondary">DraftKings (coming soon)</a>
+    </div>
+
+  </div>
+
+  <script>
+    // temporary placeholder (we’ll connect real data next step)
+
+    const exampleLegs = [
+      "Kansas City Royals ML",
+      "Miami Marlins ML",
+      "Pittsburgh Pirates ML"
+    ];
+
+    const legsDiv = document.getElementById("legs");
+
+    exampleLegs.forEach((leg, i) => {
+      const div = document.createElement("div");
+      div.className = "leg";
+      div.innerText = (i + 1) + ". " + leg;
+      legsDiv.appendChild(div);
+    });
+
+    document.getElementById("betmgm").href = "#";
+  </script>
+</body>
+</html>
