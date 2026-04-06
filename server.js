@@ -64,6 +64,12 @@ function splitIntoChunks(text, maxLen = 1800) {
   return chunks;
 }
 
+function containsAliasPhrase(haystack, alias) {
+  const h = ` ${slug(haystack)} `;
+  const a = ` ${slug(alias)} `;
+  return h.includes(a);
+}
+
 /* =========================
    TEAM MATCHING
 ========================= */
@@ -95,7 +101,7 @@ function teamAliasMap() {
     "tampa bay rays": ["tampa bay rays", "rays"],
     "texas rangers": ["texas rangers", "rangers"],
     "miami marlins": ["miami marlins", "marlins"],
-    "athletics": ["athletics", "oakland athletics", "a's", "as"],
+    "athletics": ["athletics", "oakland athletics", "a s"],
     "san diego padres": ["san diego padres", "padres"],
     "colorado rockies": ["colorado rockies", "rockies"],
     "chicago white sox": ["chicago white sox", "white sox"]
@@ -103,11 +109,10 @@ function teamAliasMap() {
 }
 
 function canonicalizeTeamName(text) {
-  const s = slug(text);
   const aliases = teamAliasMap();
 
   for (const [canonical, names] of Object.entries(aliases)) {
-    if (names.some((name) => s.includes(slug(name)))) {
+    if (names.some((name) => containsAliasPhrase(text, name))) {
       return canonical;
     }
   }
@@ -116,12 +121,12 @@ function canonicalizeTeamName(text) {
 }
 
 function extractTeamsFromLegEvent(eventText) {
-  const text = slug(stripPitchers(eventText));
+  const text = stripPitchers(eventText);
   const aliases = teamAliasMap();
   const matches = [];
 
   for (const [canonical, names] of Object.entries(aliases)) {
-    if (names.some((name) => text.includes(slug(name)))) {
+    if (names.some((name) => containsAliasPhrase(text, name))) {
       matches.push(canonical);
     }
   }
