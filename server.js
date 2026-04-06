@@ -6,8 +6,8 @@ app.use(express.json());
 const PORT = process.env.PORT || 3000;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "";
 const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN || "";
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const ODDS_API_KEY = process.env.ODDS_API_KEY;
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
+const ODDS_API_KEY = process.env.ODDS_API_KEY || "";
 
 const userSlipStore = {};
 
@@ -108,6 +108,41 @@ function teamAliasMap() {
   };
 }
 
+function moneylineOptionIdMap() {
+  return {
+    "baltimore orioles": "MGM_OPTION_ORIOLES_ML",
+    "chicago white sox": "MGM_OPTION_WHITE_SOX_ML",
+    "pittsburgh pirates": "MGM_OPTION_PIRATES_ML",
+    "philadelphia phillies": "MGM_OPTION_PHILLIES_ML",
+    "toronto blue jays": "MGM_OPTION_BLUE_JAYS_ML",
+    "atlanta braves": "MGM_OPTION_BRAVES_ML",
+    "chicago cubs": "MGM_OPTION_CUBS_ML",
+    "milwaukee brewers": "MGM_OPTION_BREWERS_ML",
+    "new york mets": "MGM_OPTION_METS_ML",
+    "houston astros": "MGM_OPTION_ASTROS_ML",
+    "new york yankees": "MGM_OPTION_YANKEES_ML",
+    "san francisco giants": "MGM_OPTION_GIANTS_ML",
+    "los angeles dodgers": "MGM_OPTION_DODGERS_ML",
+    "minnesota twins": "MGM_OPTION_TWINS_ML",
+    "kansas city royals": "MGM_OPTION_ROYALS_ML",
+    "texas rangers": "MGM_OPTION_RANGERS_ML",
+    "miami marlins": "MGM_OPTION_MARLINS_ML",
+    "cincinnati reds": "MGM_OPTION_REDS_ML",
+    "washington nationals": "MGM_OPTION_NATIONALS_ML",
+    "colorado rockies": "MGM_OPTION_ROCKIES_ML",
+    "athletics": "MGM_OPTION_ATHLETICS_ML",
+    "los angeles angels": "MGM_OPTION_ANGELS_ML",
+    "tampa bay rays": "MGM_OPTION_RAYS_ML",
+    "st. louis cardinals": "MGM_OPTION_CARDINALS_ML",
+    "detroit tigers": "MGM_OPTION_TIGERS_ML",
+    "boston red sox": "MGM_OPTION_RED_SOX_ML",
+    "seattle mariners": "MGM_OPTION_MARINERS_ML",
+    "san diego padres": "MGM_OPTION_PADRES_ML",
+    "cleveland guardians": "MGM_OPTION_GUARDIANS_ML",
+    "arizona diamondbacks": "MGM_OPTION_DIAMONDBACKS_ML"
+  };
+}
+
 function canonicalizeTeamName(text) {
   const aliases = teamAliasMap();
 
@@ -149,13 +184,41 @@ function extractLine(market = "") {
   return match ? `${match[1]}+` : "";
 }
 
+function inferMoneylineParticipant(selection = "", eventText = "") {
+  const selectionCanonical = canonicalizeTeamName(selection);
+  if (selectionCanonical) return selectionCanonical;
+
+  const eventTeams = extractTeamsFromLegEvent(eventText);
+  if (eventTeams.length === 2) {
+    const selectionSlug = slug(selection);
+    for (const team of eventTeams) {
+      if (selectionSlug && containsAliasPhrase(team, selectionSlug)) {
+        return team;
+      }
+    }
+  }
+
+  return clean(selection);
+}
+
 function normalizeLeg(leg, fallbackEvent = "") {
+  const event = clean(leg.event || fallbackEvent);
+  const rawMarket = clean(leg.market);
+  const marketType = normalizeMarketType(rawMarket);
+  const rawSelection = clean(leg.selection);
+
+  const participant =
+    marketType === "moneyline"
+      ? inferMoneylineParticipant(rawSelection, event)
+      : rawSelection;
+
   return {
-    event: clean(leg.event || fallbackEvent),
-    participant: clean(leg.selection),
-    marketType: normalizeMarketType(leg.market),
-    line: extractLine(leg.market),
-    rawMarket: clean(leg.market)
+    event,
+    participant,
+    marketType,
+    line: extractLine(rawMarket),
+    rawMarket,
+    rawSelection
   };
 }
 
@@ -182,41 +245,6 @@ function getMockBetMGMOptions() {
           participant: "Luis Arraez",
           line: "2+"
         }
-      ]
-    },
-    {
-      marketId: "MGM_MARKET_MONEYLINE",
-      options: [
-        { optionId: "MGM_OPTION_ORIOLES_ML", participant: "Baltimore Orioles" },
-        { optionId: "MGM_OPTION_WHITE_SOX_ML", participant: "Chicago White Sox" },
-        { optionId: "MGM_OPTION_PIRATES_ML", participant: "Pittsburgh Pirates" },
-        { optionId: "MGM_OPTION_PHILLIES_ML", participant: "Philadelphia Phillies" },
-        { optionId: "MGM_OPTION_BLUE_JAYS_ML", participant: "Toronto Blue Jays" },
-        { optionId: "MGM_OPTION_BRAVES_ML", participant: "Atlanta Braves" },
-        { optionId: "MGM_OPTION_CUBS_ML", participant: "Chicago Cubs" },
-        { optionId: "MGM_OPTION_BREWERS_ML", participant: "Milwaukee Brewers" },
-        { optionId: "MGM_OPTION_METS_ML", participant: "New York Mets" },
-        { optionId: "MGM_OPTION_ASTROS_ML", participant: "Houston Astros" },
-        { optionId: "MGM_OPTION_YANKEES_ML", participant: "New York Yankees" },
-        { optionId: "MGM_OPTION_GIANTS_ML", participant: "San Francisco Giants" },
-        { optionId: "MGM_OPTION_DODGERS_ML", participant: "Los Angeles Dodgers" },
-        { optionId: "MGM_OPTION_TWINS_ML", participant: "Minnesota Twins" },
-        { optionId: "MGM_OPTION_ROYALS_ML", participant: "Kansas City Royals" },
-        { optionId: "MGM_OPTION_RANGERS_ML", participant: "Texas Rangers" },
-        { optionId: "MGM_OPTION_MARLINS_ML", participant: "Miami Marlins" },
-        { optionId: "MGM_OPTION_REDS_ML", participant: "Cincinnati Reds" },
-        { optionId: "MGM_OPTION_NATIONALS_ML", participant: "Washington Nationals" },
-        { optionId: "MGM_OPTION_ROCKIES_ML", participant: "Colorado Rockies" },
-        { optionId: "MGM_OPTION_ATHLETICS_ML", participant: "Athletics" },
-        { optionId: "MGM_OPTION_ANGELS_ML", participant: "Los Angeles Angels" },
-        { optionId: "MGM_OPTION_RAYS_ML", participant: "Tampa Bay Rays" },
-        { optionId: "MGM_OPTION_CARDINALS_ML", participant: "St. Louis Cardinals" },
-        { optionId: "MGM_OPTION_TIGERS_ML", participant: "Detroit Tigers" },
-        { optionId: "MGM_OPTION_RED_SOX_ML", participant: "Boston Red Sox" },
-        { optionId: "MGM_OPTION_MARINERS_ML", participant: "Seattle Mariners" },
-        { optionId: "MGM_OPTION_PADRES_ML", participant: "San Diego Padres" },
-        { optionId: "MGM_OPTION_GUARDIANS_ML", participant: "Cleveland Guardians" },
-        { optionId: "MGM_OPTION_DIAMONDBACKS_ML", participant: "Arizona Diamondbacks" }
       ]
     }
   ];
@@ -332,7 +360,20 @@ async function searchBetMGMMarkets(_fixtureId, leg) {
   return { resolved: true, marketId };
 }
 
+function resolveMoneylineOptionId(leg) {
+  const canonical = canonicalizeTeamName(leg.participant);
+  if (!canonical) return null;
+
+  return moneylineOptionIdMap()[canonical] || null;
+}
+
 async function searchBetMGMOptions(_fixtureId, marketId, leg) {
+  if (marketId === "MGM_MARKET_MONEYLINE") {
+    const optionId = resolveMoneylineOptionId(leg);
+    if (!optionId) return { resolved: false };
+    return { resolved: true, optionId };
+  }
+
   const bucket = getMockBetMGMOptions().find((o) => o.marketId === marketId);
   if (!bucket) return { resolved: false };
 
@@ -438,6 +479,7 @@ function buildDebug(resolved) {
           : `\nwantedTeams: ${(l.wantedTeams || []).join(" | ")}\nmatchedTeams: ${(l.matchedTeams || []).join(" | ")}`;
 
       return `${i + 1}. ${l.participant}
+rawSelection: ${l.rawSelection || ""}
 event: ${l.event}
 market: ${l.rawMarket}
 marketType: ${l.marketType}
@@ -465,10 +507,26 @@ function buildUnresolved(resolved) {
   return failed
     .map(
       (l, i) => `${i + 1}. ${l.participant}
+rawSelection: ${l.rawSelection || ""}
 event: ${l.event}
 market: ${l.rawMarket}
 resolverNote: ${l.resolverNote || ""}
 wantedTeams: ${(l.wantedTeams || []).join(" | ")}`
+    )
+    .join("\n\n");
+}
+
+function buildStoredSlipMessage(saved) {
+  if (!saved?.legs?.length) return "No saved slip.";
+
+  return saved.legs
+    .map(
+      (leg, i) => `${i + 1}. ${leg.participant}
+rawSelection: ${leg.rawSelection || ""}
+event: ${leg.event}
+market: ${leg.rawMarket}
+marketType: ${leg.marketType}
+line: ${leg.line}`
     )
     .join("\n\n");
 }
@@ -542,7 +600,8 @@ app.post("/webhook", async (req, res) => {
         if (!event.sender || !event.sender.id) continue;
 
         const sender = event.sender.id;
-        const text = event.message?.text || "";
+        const text = clean(event.message?.text || "");
+        const lower = text.toLowerCase();
 
         let imageUrl = null;
         if (event.message.attachments) {
@@ -552,7 +611,7 @@ app.post("/webhook", async (req, res) => {
           }
         }
 
-        if (text.toLowerCase() === "reset") {
+        if (lower === "reset") {
           delete userSlipStore[sender];
           await sendMessage(sender, "Session cleared.");
           continue;
@@ -610,7 +669,7 @@ app.post("/webhook", async (req, res) => {
           continue;
         }
 
-        if (text.toLowerCase() === "betmgm") {
+        if (lower === "betmgm") {
           const saved = userSlipStore[sender];
 
           if (!saved?.legs) {
@@ -650,7 +709,7 @@ app.post("/webhook", async (req, res) => {
           continue;
         }
 
-        if (text.toLowerCase() === "payload debug") {
+        if (lower === "payload debug") {
           const saved = userSlipStore[sender];
 
           if (!saved?.resolved) {
@@ -662,7 +721,7 @@ app.post("/webhook", async (req, res) => {
           continue;
         }
 
-        if (text.toLowerCase() === "unresolved") {
+        if (lower === "unresolved") {
           const saved = userSlipStore[sender];
 
           if (!saved?.resolved) {
@@ -674,7 +733,7 @@ app.post("/webhook", async (req, res) => {
           continue;
         }
 
-        if (text.toLowerCase() === "deep link") {
+        if (lower === "deep link") {
           const saved = userSlipStore[sender];
 
           if (!saved?.resolved) {
@@ -686,7 +745,19 @@ app.post("/webhook", async (req, res) => {
           continue;
         }
 
-        if (text.toLowerCase() === "odds lines") {
+        if (lower === "slip debug") {
+          const saved = userSlipStore[sender];
+
+          if (!saved?.legs) {
+            await sendMessage(sender, "No saved slip. Send the image first.");
+            continue;
+          }
+
+          await sendMessage(sender, buildStoredSlipMessage(saved));
+          continue;
+        }
+
+        if (lower === "odds lines") {
           const msg = await buildOddsLinesMessage();
           await sendMessage(sender, msg);
           continue;
@@ -694,7 +765,10 @@ app.post("/webhook", async (req, res) => {
 
         if (!text) continue;
 
-        await sendMessage(sender, 'Send slip image, then reply "BetMGM".');
+        await sendMessage(
+          sender,
+          'Send slip image, then reply "BetMGM".\nOther commands: deep link, unresolved, payload debug, slip debug, reset'
+        );
       }
     }
 
