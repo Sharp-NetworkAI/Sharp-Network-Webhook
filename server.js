@@ -4,8 +4,8 @@ const app = express();
 app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
-const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "sharpnetworkbot";
-const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
+const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "";
+const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN || "";
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const ODDS_API_KEY = process.env.ODDS_API_KEY;
 
@@ -31,8 +31,8 @@ function safeParseJSON(text) {
         return JSON.parse(match[0]);
       } catch {}
     }
+    return null;
   }
-  return null;
 }
 
 function clean(v) {
@@ -69,14 +69,14 @@ function splitIntoChunks(text, maxLen = 1800) {
 ========================= */
 function teamAliasMap() {
   return {
-    "new york yankees": ["new york yankees", "yankees", "nyy"],
+    "new york yankees": ["new york yankees", "yankees"],
     "san francisco giants": ["san francisco giants", "giants"],
     "los angeles dodgers": ["los angeles dodgers", "dodgers"],
     "chicago cubs": ["chicago cubs", "cubs"],
     "atlanta braves": ["atlanta braves", "braves"],
     "cincinnati reds": ["cincinnati reds", "reds"],
     "milwaukee brewers": ["milwaukee brewers", "brewers"],
-    "st. louis cardinals": ["st louis cardinals", "st. louis cardinals", "cardinals"],
+    "st. louis cardinals": ["st. louis cardinals", "st louis cardinals", "cardinals"],
     "detroit tigers": ["detroit tigers", "tigers"],
     "new york mets": ["new york mets", "mets"],
     "philadelphia phillies": ["philadelphia phillies", "phillies"],
@@ -86,16 +86,16 @@ function teamAliasMap() {
     "minnesota twins": ["minnesota twins", "twins"],
     "houston astros": ["houston astros", "astros"],
     "los angeles angels": ["los angeles angels", "angels"],
-    "arizona diamondbacks": ["arizona diamondbacks", "diamondbacks"],
-    "washington nationals": ["washington nationals", "nationals"],
+    "arizona diamondbacks": ["arizona diamondbacks", "diamondbacks", "dbacks"],
+    "washington nationals": ["washington nationals", "nationals", "nats"],
     "seattle mariners": ["seattle mariners", "mariners"],
     "kansas city royals": ["kansas city royals", "royals"],
-    "toronto blue jays": ["toronto blue jays", "blue jays"],
+    "toronto blue jays": ["toronto blue jays", "blue jays", "jays"],
     "pittsburgh pirates": ["pittsburgh pirates", "pirates"],
     "tampa bay rays": ["tampa bay rays", "rays"],
     "texas rangers": ["texas rangers", "rangers"],
     "miami marlins": ["miami marlins", "marlins"],
-    "athletics": ["athletics", "oakland athletics"],
+    "athletics": ["athletics", "oakland athletics", "a's", "as"],
     "san diego padres": ["san diego padres", "padres"],
     "colorado rockies": ["colorado rockies", "rockies"],
     "chicago white sox": ["chicago white sox", "white sox"]
@@ -166,14 +166,14 @@ function getMockBetMGMOptions() {
         { optionId: "MGM_OPTION_AUSTIN_WELLS_HR", participant: "Austin Wells" },
         { optionId: "MGM_OPTION_MICHAEL_BUSCH_HR", participant: "Michael Busch" },
         { optionId: "MGM_OPTION_ELLY_DE_LA_CRUZ_HR", participant: "Elly De La Cruz" },
-        { optionId: "MGM_OPTION_RONALD_ACUNA_JR_HR", participant: "Ronald Acuna Jr." }
+        { optionId: "MGM_OPTION_RONALD_ACUNA_JR_HR", participant: "Ronald Acuna Jr" }
       ]
     },
     {
       marketId: "MGM_MARKET_TOTAL_BASES",
       options: [
         {
-          optionId: "MGM_OPTION_LUIS_ARRAEZ_TOTAL_BASES_2_PLUS",
+          optionId: "MGM_OPTION_LUIS_ARRAEZ_TOTAL_BASES_2PLUS",
           participant: "Luis Arraez",
           line: "2+"
         }
@@ -210,7 +210,8 @@ function getMockBetMGMOptions() {
         { optionId: "MGM_OPTION_RED_SOX_ML", participant: "Boston Red Sox" },
         { optionId: "MGM_OPTION_MARINERS_ML", participant: "Seattle Mariners" },
         { optionId: "MGM_OPTION_PADRES_ML", participant: "San Diego Padres" },
-        { optionId: "MGM_OPTION_GUARDIANS_ML", participant: "Cleveland Guardians" }
+        { optionId: "MGM_OPTION_GUARDIANS_ML", participant: "Cleveland Guardians" },
+        { optionId: "MGM_OPTION_DIAMONDBACKS_ML", participant: "Arizona Diamondbacks" }
       ]
     }
   ];
@@ -227,7 +228,7 @@ async function fetchOddsApiMLBEvents() {
   }
 
   if (!ODDS_API_KEY) {
-    return { success: false, error: "ODDS_API_KEY missing", data: [] };
+    return { success: false, error: "ODDS_API_KEY missing", data: [], cached: false };
   }
 
   const url =
@@ -243,16 +244,21 @@ async function fetchOddsApiMLBEvents() {
       error: Array.isArray(data)
         ? `The Odds API HTTP ${resp.status}`
         : (data?.message || `The Odds API HTTP ${resp.status}`),
-      data: []
+      data: [],
+      cached: false
     };
   }
 
-  oddsCache = { fetchedAt: now, data: Array.isArray(data) ? data : [] };
+  oddsCache = {
+    fetchedAt: now,
+    data: Array.isArray(data) ? data : []
+  };
+
   return { success: true, error: null, data: oddsCache.data, cached: false };
 }
 
 function extractEventTeamsFromOddsApiEvent(eventObj) {
-  const candidates = [eventObj.home_team, eventObj.away_team].filter(Boolean);
+  const candidates = [eventObj.home_team, eventObj.away_team];
   const found = [];
 
   for (const candidate of candidates) {
@@ -272,7 +278,7 @@ async function searchBetMGMFixtures(leg, oddsData = null) {
   if (wantedTeams.length < 2) {
     return {
       resolved: false,
-      reason: "Could not identify both teams from parsed event",
+      reason: "Could not identify both teams from leg event",
       wantedTeams
     };
   }
@@ -317,6 +323,7 @@ async function searchBetMGMMarkets(_fixtureId, leg) {
 
   const marketId = marketTable[leg.marketType];
   if (!marketId) return { resolved: false };
+
   return { resolved: true, marketId };
 }
 
@@ -327,8 +334,10 @@ async function searchBetMGMOptions(_fixtureId, marketId, leg) {
   const option = bucket.options.find((o) => {
     const sameParticipant =
       clean(o.participant).toLowerCase() === clean(leg.participant).toLowerCase();
+
     const sameLine =
       !o.line || !leg.line || clean(o.line) === clean(leg.line);
+
     return sameParticipant && sameLine;
   });
 
@@ -410,13 +419,18 @@ function buildBetMGMDeepLink(resolvedLegs) {
   return `https://sports.betmgm.com/en/sports?options=${encodeURIComponent(str)}`;
 }
 
+function buildLinkOnly(resolvedLegs) {
+  const link = buildBetMGMDeepLink(resolvedLegs);
+  return link || "No deep link available yet.";
+}
+
 function buildDebug(resolved) {
   return resolved
     .map((l, i) => {
       const extra =
         l.fixtureId === "NOT_FOUND"
-          ? `\nwantedTeams: ${(l.wantedTeams || []).join(" | ") || "none"}`
-          : `\nwantedTeams: ${(l.wantedTeams || []).join(" | ") || "none"}\nmatchedTeams: ${(l.matchedTeams || []).join(" | ") || "none"}`;
+          ? `\nwantedTeams: ${(l.wantedTeams || []).join(" | ")}`
+          : `\nwantedTeams: ${(l.wantedTeams || []).join(" | ")}\nmatchedTeams: ${(l.matchedTeams || []).join(" | ")}`;
 
       return `${i + 1}. ${l.participant}
 event: ${l.event}
@@ -432,7 +446,12 @@ resolverNote: ${l.resolverNote || ""}${extra}`;
 }
 
 function buildUnresolved(resolved) {
-  const failed = resolved.filter((l) => l.fixtureId === "NOT_FOUND");
+  const failed = resolved.filter(
+    (l) =>
+      l.fixtureId === "NOT_FOUND" ||
+      l.marketId === "NOT_FOUND" ||
+      l.optionId === "NOT_FOUND"
+  );
 
   if (!failed.length) {
     return "All legs resolved ✅";
@@ -444,7 +463,7 @@ function buildUnresolved(resolved) {
 event: ${l.event}
 market: ${l.rawMarket}
 resolverNote: ${l.resolverNote || ""}
-wantedTeams: ${(l.wantedTeams || []).join(" | ") || "none"}`
+wantedTeams: ${(l.wantedTeams || []).join(" | ")}`
     )
     .join("\n\n");
 }
@@ -465,8 +484,8 @@ async function buildOddsLinesMessage() {
 
   for (const eventObj of odds.data.slice(0, 10)) {
     lines.push(`fixtureId: ${clean(eventObj.id)}`);
-    lines.push(`home: ${clean(eventObj.home_team) || "none"}`);
-    lines.push(`away: ${clean(eventObj.away_team) || "none"}`);
+    lines.push(`home: ${clean(eventObj.home_team)}`);
+    lines.push(`away: ${clean(eventObj.away_team)}`);
     lines.push("");
   }
 
@@ -477,7 +496,7 @@ async function buildOddsLinesMessage() {
    SEND
 ========================= */
 async function sendMessage(id, text) {
-  const chunks = splitIntoChunks(String(text || ""), 1800);
+  const chunks = splitIntoChunks(String(text || ""));
 
   for (const chunk of chunks) {
     await fetch(
@@ -530,7 +549,7 @@ app.post("/webhook", async (req, res) => {
 
         if (text.toLowerCase() === "reset") {
           delete userSlipStore[sender];
-          await sendMessage(sender, "Session cleared ✅\nSend a new slip.");
+          await sendMessage(sender, "Session cleared.");
           continue;
         }
 
@@ -550,7 +569,7 @@ app.post("/webhook", async (req, res) => {
                     {
                       type: "input_text",
                       text:
-                        'Return ONLY valid JSON. No explanation. No markdown. Format EXACTLY like this: {"bet_type":"","source_sportsbook":"","odds":"","stake":"","payout":"","event":"","legs":[{"event":"","market":"","selection":""}]}. IMPORTANT: include the full matchup for each leg event when visible, for example "Chicago Cubs @ Cincinnati Reds". If a leg event is missing, use the top-level event field as fallback.'
+                        'Return ONLY valid JSON. No markdown. Extract a betting slip into this exact shape: {"event":"","legs":[{"event":"","market":"","selection":""}]}. Use the top-level event if visible. Each leg must include event if visible, market, and selection.'
                     },
                     {
                       type: "input_image",
@@ -563,10 +582,14 @@ app.post("/webhook", async (req, res) => {
           });
 
           const data = await ai.json();
-          const raw = data.output?.[0]?.content?.[0]?.text || "";
+          const raw =
+            data.output?.[0]?.content?.[0]?.text ||
+            data.output_text ||
+            "";
+
           const parsed = safeParseJSON(raw);
 
-          if (!parsed || !Array.isArray(parsed.legs) || !parsed.legs.length) {
+          if (!parsed || !Array.isArray(parsed.legs)) {
             await sendMessage(sender, "parse failed");
             continue;
           }
@@ -578,7 +601,7 @@ app.post("/webhook", async (req, res) => {
             resolved: null
           };
 
-          await sendMessage(sender, "Slip copied ✅\n\nReply: BetMGM");
+          await sendMessage(sender, "Slip copied ✅\n\nReply BetMGM");
           continue;
         }
 
@@ -588,14 +611,14 @@ app.post("/webhook", async (req, res) => {
           if (!saved?.legs) {
             await sendMessage(
               sender,
-              "⚠️ Session expired.\n\nSend the slip image again, then reply BetMGM."
+              "⚠️ Session expired.\n\nSend the slip image again first."
             );
             continue;
           }
 
           const odds = await fetchOddsApiMLBEvents();
-
           const resolved = [];
+
           for (const leg of saved.legs) {
             resolved.push(await resolveLeg(leg, odds));
           }
@@ -606,7 +629,12 @@ app.post("/webhook", async (req, res) => {
           const link = buildBetMGMDeepLink(resolved);
 
           const total = resolved.length;
-          const success = resolved.filter((l) => l.fixtureId !== "NOT_FOUND").length;
+          const success = resolved.filter(
+            (l) =>
+              l.fixtureId !== "NOT_FOUND" &&
+              l.marketId !== "NOT_FOUND" &&
+              l.optionId !== "NOT_FOUND"
+          ).length;
 
           await sendMessage(sender, `BetMGM ready ✅\nResolved: ${success}/${total}`);
           await sendMessage(sender, JSON.stringify(slip, null, 2));
@@ -641,6 +669,18 @@ app.post("/webhook", async (req, res) => {
           continue;
         }
 
+        if (text.toLowerCase() === "deep link") {
+          const saved = userSlipStore[sender];
+
+          if (!saved?.resolved) {
+            await sendMessage(sender, "Run BetMGM first");
+            continue;
+          }
+
+          await sendMessage(sender, buildLinkOnly(saved.resolved));
+          continue;
+        }
+
         if (text.toLowerCase() === "odds lines") {
           const msg = await buildOddsLinesMessage();
           await sendMessage(sender, msg);
@@ -648,7 +688,8 @@ app.post("/webhook", async (req, res) => {
         }
 
         if (!text) continue;
-        await sendMessage(sender, "Send slip image");
+
+        await sendMessage(sender, 'Send slip image, then reply "BetMGM".');
       }
     }
 
