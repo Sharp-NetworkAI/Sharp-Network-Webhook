@@ -12,6 +12,7 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
 const ODDS_API_KEY = process.env.ODDS_API_KEY || "";
 
 const userSlipStore = {};
+const publicSlipStore = {};
 
 let oddsCache = {
   fetchedAt: 0,
