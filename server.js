@@ -1,6 +1,5 @@
 const express = require("express");
 const path = require("path");
-const crypto = require("crypto");
 
 const app = express();
 app.use(express.json());
@@ -650,6 +649,10 @@ async function resolveSavedSlipForUser(sender) {
 /* =========================
    ROUTES
 ========================= */
+app.get("/s/:slipId", (_req, res) => {
+  res.sendFile(path.join(__dirname, "public", "slip.html"));
+});
+
 app.get("/", (_req, res) => {
   res.send("running");
 });
