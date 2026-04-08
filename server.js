@@ -104,6 +104,7 @@ app.post("/webhook", async (req, res) => {
         if (!event.sender?.id) continue;
 
         const sender = event.sender.id;
+        const text = clean(event.message?.text || "");
 
         let imageUrl = null;
         if (event.message?.attachments) {
@@ -126,6 +127,7 @@ app.post("/webhook", async (req, res) => {
 
           publicSlipStore[slipId] = {
             legs: resolved,
+            betmgmLink: "https://sports.betmgm.com/",
             createdAt: Date.now()
           };
 
@@ -137,7 +139,9 @@ app.post("/webhook", async (req, res) => {
           continue;
         }
 
-        await sendMessage(sender, "Send a betting slip image 📸");
+        if (text) {
+          await sendMessage(sender, "Send a betting slip image 📸");
+        }
       }
     }
 
