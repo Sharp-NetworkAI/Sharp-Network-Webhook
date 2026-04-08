@@ -57,12 +57,12 @@ async function sendMessage(id, text) {
    ROUTES
 ========================= */
 
-// 🔥 SLIP PAGE
+// Slip page
 app.get("/s/:slipId", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "slip.html"));
 });
 
-// 🔥 API FOR SLIP DATA
+// API for slip data
 app.get("/api/slip/:slipId", (req, res) => {
   const slip = publicSlipStore[req.params.slipId];
 
@@ -79,12 +79,12 @@ app.get("/api/slip/:slipId", (req, res) => {
   });
 });
 
-// HEALTH CHECK
+// Health check
 app.get("/", (_req, res) => {
   res.send("running");
 });
 
-// META VERIFY
+// Meta verify
 app.get("/webhook", (req, res) => {
   if (req.query["hub.verify_token"] === VERIFY_TOKEN) {
     return res.send(req.query["hub.challenge"]);
@@ -113,28 +113,25 @@ app.post("/webhook", async (req, res) => {
           if (img?.payload?.url) imageUrl = img.payload.url;
         }
 
-        // ===== IMAGE RECEIVED =====
+        // IMAGE RECEIVED
         if (imageUrl) {
-          // 🔥 TEMP MOCK DATA (next step we plug real resolver back in)
+          // Temporary mock data for the slip page
           const resolved = [
             { team: "Kansas City Royals", odds: "-110" },
             { team: "Miami Marlins", odds: "+120" },
             { team: "Atlanta Braves", odds: "-150" }
           ];
 
-          // 🔥 CREATE ID
           const slipId = createSlipId();
 
-          // 🔥 STORE SLIP
           publicSlipStore[slipId] = {
             legs: resolved,
             createdAt: Date.now()
           };
 
-          // 🔥 SEND LINK
           await sendMessage(
             sender,
-            `Slip ready ✅\n\nhttps://sharp-network-webhook.onrender.com${slipId}`
+            `Slip ready ✅\n\nhttps://sharp-network-webhook.onrender.com/s/${slipId}`
           );
 
           continue;
