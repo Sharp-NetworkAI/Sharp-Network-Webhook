@@ -30,6 +30,10 @@
       margin: 0 0 10px 0;
     }
 
+    h2 {
+      margin-top: 0;
+    }
+
     .leg {
       padding: 10px 0;
       border-bottom: 1px solid #2a2a34;
@@ -80,24 +84,59 @@
   </div>
 
   <script>
-    // temporary placeholder (we’ll connect real data next step)
+    async function loadSlip() {
+      const parts = window.location.pathname.split("/");
+      const slipId = parts[parts.length - 1];
 
-    const exampleLegs = [
-      "Kansas City Royals ML",
-      "Miami Marlins ML",
-      "Pittsburgh Pirates ML"
-    ];
+      try {
+        const resp = await fetch(`/api/slip/${slipId}`);
+        const data = await resp.json();
 
-    const legsDiv = document.getElementById("legs");
+        if (!resp.ok || !data.success) {
+          throw new Error("Slip not found");
+        }
 
-    exampleLegs.forEach((leg, i) => {
-      const div = document.createElement("div");
-      div.className = "leg";
-      div.innerText = (i + 1) + ". " + leg;
-      legsDiv.appendChild(div);
-    });
+        const slip = data.slip;
+        const legsDiv = document.getElementById("legs");
+        legsDiv.innerHTML = "";
 
-    document.getElementById("betmgm").href = "#";
+        (slip.legs || []).forEach((leg, i) => {
+          const div = document.createElement("div");
+          div.className = "leg";
+
+          const label =
+            leg.team ||
+            leg.participant ||
+            leg.rawSelection ||
+            "Unknown leg";
+
+          const oddsText = leg.odds ? ` (${leg.odds})` : "";
+
+          div.innerText = `${i + 1}. ${label}${oddsText}`;
+          legsDiv.appendChild(div);
+        });
+
+        // 🔥 BetMGM link (if available)
+        if (slip.betmgmLink) {
+          document.getElementById("betmgm").href = slip.betmgmLink;
+        } else {
+          document.getElementById("betmgm").innerText = "BetMGM (not ready)";
+          document.getElementById("betmgm").style.opacity = "0.5";
+        }
+
+      } catch (err) {
+        document.body.innerHTML = `
+          <div class="wrap">
+            <div class="card">
+              <h1>Slip not found</h1>
+              <p>This slip may have expired.</p>
+            </div>
+          </div>
+        `;
+      }
+    }
+
+    loadSlip();
   </script>
 </body>
 </html>
