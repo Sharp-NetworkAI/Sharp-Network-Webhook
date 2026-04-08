@@ -134,7 +134,7 @@ app.post("/webhook", async (req, res) => {
           // 🔥 SEND LINK
           await sendMessage(
             sender,
-            `Slip ready ✅\n\nhttps://your-render-url.onrender.com/s/${slipId}`
+            `Slip ready ✅\n\nhttps://sharp-network-webhook.onrender.com${slipId}`
           );
 
           continue;
