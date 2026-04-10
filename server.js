@@ -38,6 +38,7 @@ function createSlipId() {
 ========================= */
 async function sendMessage(id, text) {
   const chunks = splitIntoChunks(String(text || ""));
+
   for (const chunk of chunks) {
     await fetch(
       `https://graph.facebook.com/v18.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`,
@@ -53,12 +54,15 @@ async function sendMessage(id, text) {
   }
 }
 
+/* =========================
+   OPENAI PARSER
+========================= */
 async function parseSlipFromImage(imageUrl) {
   const resp = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "Authorization": `Bearer ${OPENAI_API_KEY}`
+      Authorization: `Bearer ${OPENAI_API_KEY}`
     },
     body: JSON.stringify({
       model: "gpt-4.1-mini",
@@ -95,18 +99,14 @@ async function parseSlipFromImage(imageUrl) {
     return { legs: [] };
   }
 }
-}
 
 /* =========================
    ROUTES
 ========================= */
-
-// Slip page
 app.get("/s/:slipId", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "slip.html"));
 });
 
-// API for slip data
 app.get("/api/slip/:slipId", (req, res) => {
   const slip = publicSlipStore[req.params.slipId];
 
@@ -123,12 +123,10 @@ app.get("/api/slip/:slipId", (req, res) => {
   });
 });
 
-// Health check
 app.get("/", (_req, res) => {
   res.send("running");
 });
 
-// Meta verify
 app.get("/webhook", (req, res) => {
   if (req.query["hub.verify_token"] === VERIFY_TOKEN) {
     return res.send(req.query["hub.challenge"]);
@@ -152,28 +150,21 @@ app.post("/webhook", async (req, res) => {
 
         let imageUrl = null;
         if (event.message?.attachments) {
-          const img = event.message.attachments.find(
-            (a) => a.type === "image"
-          );
+          const img = event.message.attachments.find((a) => a.type === "image");
           if (img?.payload?.url) imageUrl = img.payload.url;
         }
 
-        // ===== IMAGE RECEIVED =====
         if (imageUrl) {
-          // Temporary mock data for the slip page
-          const resolved = [
-            { team: "Kansas City Royals", odds: "-110" },
-            { team: "Miami Marlins", odds: "+120" },
-            { team: "Atlanta Braves", odds: "-150" }
-          ];
+          const parsed = await parseSlipFromImage(imageUrl);
+          const resolved = Array.isArray(parsed.legs) ? parsed.legs : [];
 
           const slipId = createSlipId();
 
           publicSlipStore[slipId] = {
             legs: resolved,
             betmgmLink: "https://sports.betmgm.com/",
-            fanduelCopy: resolved.map((leg, i) => `${i + 1}. ${leg.team}`).join("\n"),
-            draftkingsCopy: resolved.map((leg, i) => `${i + 1}. ${leg.team}`).join("\n"),
+            fanduelCopy: resolved.map((leg, i) => `${i + 1}. ${leg.team || "Unknown team"}`).join("\n"),
+            draftkingsCopy: resolved.map((leg, i) => `${i + 1}. ${leg.team || "Unknown team"}`).join("\n"),
             createdAt: Date.now()
           };
 
