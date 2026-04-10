@@ -103,10 +103,13 @@ async function parseSlipFromImage(imageUrl) {
 /* =========================
    ROUTES
 ========================= */
+
+// Slip page
 app.get("/s/:slipId", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "slip.html"));
 });
 
+// API for slip data
 app.get("/api/slip/:slipId", (req, res) => {
   const slip = publicSlipStore[req.params.slipId];
 
@@ -123,10 +126,12 @@ app.get("/api/slip/:slipId", (req, res) => {
   });
 });
 
+// Health check
 app.get("/", (_req, res) => {
   res.send("running");
 });
 
+// Meta verify
 app.get("/webhook", (req, res) => {
   if (req.query["hub.verify_token"] === VERIFY_TOKEN) {
     return res.send(req.query["hub.challenge"]);
@@ -154,10 +159,12 @@ app.post("/webhook", async (req, res) => {
           if (img?.payload?.url) imageUrl = img.payload.url;
         }
 
+        // ===== IMAGE RECEIVED =====
         if (imageUrl) {
           const parsed = await parseSlipFromImage(imageUrl);
           const resolved = Array.isArray(parsed.legs) ? parsed.legs : [];
 
+          // fallback if nothing parsed
           if (!resolved.length) {
             await sendMessage(
               sender,
@@ -170,7 +177,7 @@ app.post("/webhook", async (req, res) => {
 
           publicSlipStore[slipId] = {
             legs: resolved,
-            betmgmLink: "https://sports.betmgm.com/",
+            betmgmLink: `https://sports.betmgm.com/`,
             fanduelCopy: resolved
               .map((leg, i) => `${i + 1}. ${leg.team || "Unknown team"}`)
               .join("\n"),
