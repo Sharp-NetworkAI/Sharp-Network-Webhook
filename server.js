@@ -102,6 +102,25 @@ async function parseSlipFromImage(imageUrl) {
 }
 
 /* =========================
+   ODDS API
+========================= */
+async function fetchMLBEvents() {
+  const url =
+    `https://api.the-odds-api.com/v4/sports/baseball_mlb/odds` +
+    `?apiKey=${ODDS_API_KEY}&regions=us&markets=h2h`;
+
+  const resp = await fetch(url);
+  const data = await resp.json().catch(() => []);
+
+  if (!resp.ok) {
+    console.error("Odds API error:", data);
+    return [];
+  }
+
+  return Array.isArray(data) ? data : [];
+}
+
+/* =========================
    ROUTES
 ========================= */
 
@@ -160,12 +179,10 @@ app.post("/webhook", async (req, res) => {
           if (img?.payload?.url) imageUrl = img.payload.url;
         }
 
-        // ===== IMAGE RECEIVED =====
         if (imageUrl) {
           const parsed = await parseSlipFromImage(imageUrl);
           const resolved = Array.isArray(parsed.legs) ? parsed.legs : [];
 
-          // fallback if nothing parsed
           if (!resolved.length) {
             await sendMessage(
               sender,
