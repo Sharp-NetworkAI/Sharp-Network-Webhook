@@ -8,6 +8,7 @@ app.use(express.static(path.join(__dirname, "public")));
 const PORT = process.env.PORT || 3000;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "";
 const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN || "";
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
 
 const userSlipStore = {};
 const publicSlipStore = {};
