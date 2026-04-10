@@ -38,7 +38,6 @@ function createSlipId() {
 ========================= */
 async function sendMessage(id, text) {
   const chunks = splitIntoChunks(String(text || ""));
-
   for (const chunk of chunks) {
     await fetch(
       `https://graph.facebook.com/v18.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`,
@@ -52,6 +51,50 @@ async function sendMessage(id, text) {
       }
     );
   }
+}
+
+async function parseSlipFromImage(imageUrl) {
+  const resp = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${OPENAI_API_KEY}`
+    },
+    body: JSON.stringify({
+      model: "gpt-4.1-mini",
+      input: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text:
+                'Return ONLY valid JSON. No markdown. Extract a betting slip into this exact shape: {"legs":[{"team":"","odds":""}]}. Only include legs clearly visible in the image.'
+            },
+            {
+              type: "input_image",
+              image_url: imageUrl
+            }
+          ]
+        }
+      ]
+    })
+  });
+
+  const data = await resp.json();
+
+  const raw =
+    data.output?.[0]?.content?.[0]?.text ||
+    data.output_text ||
+    "";
+
+  try {
+    return JSON.parse(raw);
+  } catch (err) {
+    console.error("OpenAI parse error:", raw);
+    return { legs: [] };
+  }
+}
 }
 
 /* =========================
