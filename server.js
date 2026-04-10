@@ -120,6 +120,21 @@ async function fetchMLBEvents() {
   return Array.isArray(data) ? data : [];
 }
 
+function findMatchingEvent(teamName, events) {
+  const target = clean(teamName).toLowerCase();
+
+  for (const event of events) {
+    const home = clean(event.home_team).toLowerCase();
+    const away = clean(event.away_team).toLowerCase();
+
+    if (home === target || away === target) {
+      return event;
+    }
+  }
+
+  return null;
+}
+
 /* =========================
    ROUTES
 ========================= */
@@ -179,6 +194,7 @@ app.post("/webhook", async (req, res) => {
           if (img?.payload?.url) imageUrl = img.payload.url;
         }
 
+        // ===== IMAGE RECEIVED =====
         if (imageUrl) {
           const parsed = await parseSlipFromImage(imageUrl);
           const resolved = Array.isArray(parsed.legs) ? parsed.legs : [];
