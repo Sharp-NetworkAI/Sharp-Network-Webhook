@@ -26,13 +26,8 @@
       margin-bottom: 16px;
     }
 
-    h1 {
-      margin: 0 0 10px 0;
-    }
-
-    h2 {
-      margin-top: 0;
-    }
+    h1 { margin: 0 0 10px 0; }
+    h2 { margin-top: 0; }
 
     .leg {
       padding: 10px 0;
@@ -59,6 +54,11 @@
     .btn.secondary {
       background: #2a2a34;
     }
+
+    pre {
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
   </style>
 </head>
 
@@ -77,8 +77,13 @@
 
     <div class="card">
       <a id="betmgm" class="btn" target="_blank">Open in BetMGM</a>
-      <a class="btn secondary">FanDuel (coming soon)</a>
-      <a class="btn secondary">DraftKings (coming soon)</a>
+      <a id="fanduelBtn" class="btn secondary" href="#">FanDuel copy list</a>
+      <a id="draftkingsBtn" class="btn secondary" href="#">DraftKings copy list</a>
+    </div>
+
+    <div id="copyBox" class="card" style="display:none;">
+      <h2 id="copyTitle">Copy list</h2>
+      <pre id="copyText"></pre>
     </div>
 
   </div>
@@ -97,6 +102,8 @@
         }
 
         const slip = data.slip;
+
+        // ===== LOAD LEGS =====
         const legsDiv = document.getElementById("legs");
         legsDiv.innerHTML = "";
 
@@ -116,13 +123,33 @@
           legsDiv.appendChild(div);
         });
 
-        // 🔥 BetMGM link (if available)
+        // ===== BETMGM LINK =====
+        const betmgmBtn = document.getElementById("betmgm");
         if (slip.betmgmLink) {
-          document.getElementById("betmgm").href = slip.betmgmLink;
+          betmgmBtn.href = slip.betmgmLink;
         } else {
-          document.getElementById("betmgm").innerText = "BetMGM (not ready)";
-          document.getElementById("betmgm").style.opacity = "0.5";
+          betmgmBtn.innerText = "BetMGM (not ready)";
+          betmgmBtn.style.opacity = "0.5";
         }
+
+        // ===== COPY LOGIC =====
+        const copyBox = document.getElementById("copyBox");
+        const copyTitle = document.getElementById("copyTitle");
+        const copyText = document.getElementById("copyText");
+
+        document.getElementById("fanduelBtn").addEventListener("click", function (e) {
+          e.preventDefault();
+          copyTitle.innerText = "FanDuel copy list";
+          copyText.innerText = slip.fanduelCopy || "No FanDuel copy list available.";
+          copyBox.style.display = "block";
+        });
+
+        document.getElementById("draftkingsBtn").addEventListener("click", function (e) {
+          e.preventDefault();
+          copyTitle.innerText = "DraftKings copy list";
+          copyText.innerText = slip.draftkingsCopy || "No DraftKings copy list available.";
+          copyBox.style.display = "block";
+        });
 
       } catch (err) {
         document.body.innerHTML = `
