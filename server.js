@@ -114,7 +114,7 @@ app.post("/webhook", async (req, res) => {
           if (img?.payload?.url) imageUrl = img.payload.url;
         }
 
-        // IMAGE RECEIVED
+        // ===== IMAGE RECEIVED =====
         if (imageUrl) {
           // Temporary mock data for the slip page
           const resolved = [
@@ -128,6 +128,8 @@ app.post("/webhook", async (req, res) => {
           publicSlipStore[slipId] = {
             legs: resolved,
             betmgmLink: "https://sports.betmgm.com/",
+            fanduelCopy: resolved.map((leg, i) => `${i + 1}. ${leg.team}`).join("\n"),
+            draftkingsCopy: resolved.map((leg, i) => `${i + 1}. ${leg.team}`).join("\n"),
             createdAt: Date.now()
           };
 
