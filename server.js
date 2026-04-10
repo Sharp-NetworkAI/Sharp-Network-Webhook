@@ -158,13 +158,25 @@ app.post("/webhook", async (req, res) => {
           const parsed = await parseSlipFromImage(imageUrl);
           const resolved = Array.isArray(parsed.legs) ? parsed.legs : [];
 
+          if (!resolved.length) {
+            await sendMessage(
+              sender,
+              "I couldn’t read that slip clearly. Send a clearer screenshot that shows the full bet slip."
+            );
+            continue;
+          }
+
           const slipId = createSlipId();
 
           publicSlipStore[slipId] = {
             legs: resolved,
             betmgmLink: "https://sports.betmgm.com/",
-            fanduelCopy: resolved.map((leg, i) => `${i + 1}. ${leg.team || "Unknown team"}`).join("\n"),
-            draftkingsCopy: resolved.map((leg, i) => `${i + 1}. ${leg.team || "Unknown team"}`).join("\n"),
+            fanduelCopy: resolved
+              .map((leg, i) => `${i + 1}. ${leg.team || "Unknown team"}`)
+              .join("\n"),
+            draftkingsCopy: resolved
+              .map((leg, i) => `${i + 1}. ${leg.team || "Unknown team"}`)
+              .join("\n"),
             createdAt: Date.now()
           };
 
