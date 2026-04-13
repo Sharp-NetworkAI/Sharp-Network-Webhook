@@ -73,7 +73,7 @@ async function parseSlipFromImage(imageUrl) {
             {
               type: "input_text",
               text:
-                'Return ONLY valid JSON. No markdown. Extract a betting slip into this exact shape: {"legs":[{"team":"","odds":""}]}.'
+                'Return ONLY valid JSON. Extract a betting slip into this exact format: {"legs":[{"team":"","odds":""}]}'
             },
             {
               type: "input_image",
@@ -182,14 +182,21 @@ app.post("/webhook", async (req, res) => {
 
     for (const entry of entries) {
       for (const event of entry.messaging || []) {
+
+        // 🔥 FIX: STOP SPAM LOOP
+        if (!event.message || event.message.is_echo) continue;
+
         if (!event.sender?.id) continue;
 
         const sender = event.sender.id;
 
         let imageUrl = null;
-        if (event.message?.attachments) {
+
+        if (event.message.attachments) {
           const img = event.message.attachments.find(a => a.type === "image");
-          if (img?.payload?.url) imageUrl = img.payload.url;
+          if (img?.payload?.url) {
+            imageUrl = img.payload.url;
+          }
         }
 
         if (imageUrl) {
@@ -199,9 +206,9 @@ app.post("/webhook", async (req, res) => {
           const events = await fetchMLBEvents();
 
           const enrichedLegs = resolved.map((leg) => {
-            const eventMatch = findMatchingEvent(leg.team, events);
+            const match = findMatchingEvent(leg.team, events);
 
-            if (!eventMatch) {
+            if (!match) {
               return {
                 ...leg,
                 eventId: "NOT_FOUND"
@@ -210,9 +217,9 @@ app.post("/webhook", async (req, res) => {
 
             return {
               ...leg,
-              eventId: eventMatch.id,
-              home: eventMatch.home_team,
-              away: eventMatch.away_team
+              eventId: match.id,
+              home: match.home_team,
+              away: match.away_team
             };
           });
 
@@ -230,10 +237,9 @@ app.post("/webhook", async (req, res) => {
             `Slip ready ✅\n\nhttps://sharp-network-webhook.onrender.com/s/${slipId}`
           );
 
-          continue;
+        } else {
+          await sendMessage(sender, "Send a betting slip image 📸");
         }
-
-        await sendMessage(sender, "Send a betting slip image 📸");
       }
     }
 
