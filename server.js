@@ -11,7 +11,6 @@ const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN || "";
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
 const ODDS_API_KEY = process.env.ODDS_API_KEY || "";
 
-const userSlipStore = {};
 const publicSlipStore = {};
 
 /* =========================
@@ -74,7 +73,7 @@ async function parseSlipFromImage(imageUrl) {
             {
               type: "input_text",
               text:
-                'Return ONLY valid JSON. No markdown. Extract a betting slip into this exact shape: {"legs":[{"team":"","odds":""}]}. Only include legs clearly visible in the image.'
+                'Return ONLY valid JSON. No markdown. Extract a betting slip into this exact shape: {"legs":[{"team":"","odds":""}]}.'
             },
             {
               type: "input_image",
@@ -96,7 +95,7 @@ async function parseSlipFromImage(imageUrl) {
   try {
     return JSON.parse(raw);
   } catch (err) {
-    console.error("OpenAI parse error:", raw);
+    console.error("Parse error:", raw);
     return { legs: [] };
   }
 }
@@ -127,7 +126,12 @@ function findMatchingEvent(teamName, events) {
     const home = clean(event.home_team).toLowerCase();
     const away = clean(event.away_team).toLowerCase();
 
-    if (home === target || away === target) {
+    if (
+      home.includes(target) ||
+      away.includes(target) ||
+      target.includes(home) ||
+      target.includes(away)
+    ) {
       return event;
     }
   }
@@ -138,13 +142,21 @@ function findMatchingEvent(teamName, events) {
 /* =========================
    ROUTES
 ========================= */
+app.get("/", (_req, res) => {
+  res.send("running");
+});
 
-// Slip page
+app.get("/webhook", (req, res) => {
+  if (req.query["hub.verify_token"] === VERIFY_TOKEN) {
+    return res.send(req.query["hub.challenge"]);
+  }
+  res.sendStatus(403);
+});
+
 app.get("/s/:slipId", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "slip.html"));
 });
 
-// API for slip data
 app.get("/api/slip/:slipId", (req, res) => {
   const slip = publicSlipStore[req.params.slipId];
 
@@ -161,19 +173,6 @@ app.get("/api/slip/:slipId", (req, res) => {
   });
 });
 
-// Health check
-app.get("/", (_req, res) => {
-  res.send("running");
-});
-
-// Meta verify
-app.get("/webhook", (req, res) => {
-  if (req.query["hub.verify_token"] === VERIFY_TOKEN) {
-    return res.send(req.query["hub.challenge"]);
-  }
-  res.sendStatus(403);
-});
-
 /* =========================
    WEBHOOK
 ========================= */
@@ -186,39 +185,44 @@ app.post("/webhook", async (req, res) => {
         if (!event.sender?.id) continue;
 
         const sender = event.sender.id;
-        const text = clean(event.message?.text || "");
 
         let imageUrl = null;
         if (event.message?.attachments) {
-          const img = event.message.attachments.find((a) => a.type === "image");
+          const img = event.message.attachments.find(a => a.type === "image");
           if (img?.payload?.url) imageUrl = img.payload.url;
         }
 
-        // ===== IMAGE RECEIVED =====
         if (imageUrl) {
           const parsed = await parseSlipFromImage(imageUrl);
           const resolved = Array.isArray(parsed.legs) ? parsed.legs : [];
 
-          if (!resolved.length) {
-            await sendMessage(
-              sender,
-              "I couldn’t read that slip clearly. Send a clearer screenshot that shows the full bet slip."
-            );
-            continue;
-          }
+          const events = await fetchMLBEvents();
+
+          const enrichedLegs = resolved.map((leg) => {
+            const eventMatch = findMatchingEvent(leg.team, events);
+
+            if (!eventMatch) {
+              return {
+                ...leg,
+                eventId: "NOT_FOUND"
+              };
+            }
+
+            return {
+              ...leg,
+              eventId: eventMatch.id,
+              home: eventMatch.home_team,
+              away: eventMatch.away_team
+            };
+          });
 
           const slipId = createSlipId();
 
           publicSlipStore[slipId] = {
-            legs: resolved,
-            betmgmLink: `https://sports.betmgm.com/`,
-            fanduelCopy: resolved
-              .map((leg, i) => `${i + 1}. ${leg.team || "Unknown team"}`)
-              .join("\n"),
-            draftkingsCopy: resolved
-              .map((leg, i) => `${i + 1}. ${leg.team || "Unknown team"}`)
-              .join("\n"),
-            createdAt: Date.now()
+            legs: enrichedLegs,
+            betmgmLink: "https://sports.betmgm.com/",
+            fanduelCopy: enrichedLegs.map((l, i) => `${i + 1}. ${l.team}`).join("\n"),
+            draftkingsCopy: enrichedLegs.map((l, i) => `${i + 1}. ${l.team}`).join("\n")
           };
 
           await sendMessage(
@@ -229,9 +233,7 @@ app.post("/webhook", async (req, res) => {
           continue;
         }
 
-        if (text) {
-          await sendMessage(sender, "Send a betting slip image 📸");
-        }
+        await sendMessage(sender, "Send a betting slip image 📸");
       }
     }
 
