@@ -363,6 +363,23 @@ async function parseSlipImage(imageUrl) {
   }
 
   try {
+    // ── Download the image first ───────────────────────────────────────────────
+    // Facebook Messenger attachment URLs are gated — OpenAI cannot fetch them
+    // directly. We download the image on our server and send it as base64.
+    console.log("[openai] Downloading image from Facebook CDN...");
+    const imgResp = await fetch(imageUrl);
+    console.log("[openai] Image download status:", imgResp.status);
+    if (!imgResp.ok) {
+      console.error("[openai] Failed to download image:", imgResp.status);
+      return [];
+    }
+    const imgBuffer    = await imgResp.arrayBuffer();
+    const base64Image  = Buffer.from(imgBuffer).toString("base64");
+    const contentType  = imgResp.headers.get("content-type") || "image/jpeg";
+    const dataUri      = `data:${contentType};base64,${base64Image}`;
+    console.log("[openai] Image downloaded — size:", imgBuffer.byteLength, "bytes, type:", contentType);
+
+    // ── Send to GPT-4o as base64 data URI ─────────────────────────────────────
     console.log("[openai] Calling gpt-4o vision...");
     const resp = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -373,7 +390,7 @@ async function parseSlipImage(imageUrl) {
         temperature: 0.1,
         messages: [
           { role: "system", content: PARSE_PROMPT },
-          { role: "user", content: [{ type: "image_url", image_url: { url: imageUrl, detail: "high" } }] },
+          { role: "user", content: [{ type: "image_url", image_url: { url: dataUri, detail: "high" } }] },
         ],
       }),
     });
