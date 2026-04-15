@@ -33,6 +33,12 @@ function createSlipId() {
   return Math.random().toString(36).slice(2, 10);
 }
 
+function formatTeamForMGM(team) {
+  return `MGM_OPTION_${team
+    .toUpperCase()
+    .replace(/[^A-Z]/g, "_")}_ML`;
+}
+
 /* =========================
    SEND MESSAGE
 ========================= */
@@ -217,7 +223,7 @@ app.post("/webhook", async (req, res) => {
         let imageUrl = null;
 
         if (event.message.attachments) {
-          const img = event.message.attachments.find((a) => a.type === "image");
+          const img = event.message.attachments.find(a => a.type === "image");
           if (img?.payload?.url) {
             imageUrl = img.payload.url;
           }
@@ -255,23 +261,28 @@ app.post("/webhook", async (req, res) => {
             };
           });
 
+          // 🔥 NEW: Build BetMGM link
+          const options = enrichedLegs
+            .filter(l => l.eventId !== "NOT_FOUND")
+            .map(l => `${l.eventId}-MGM_MARKET_MONEYLINE-${formatTeamForMGM(l.team)}`)
+            .join("%2C");
+
+          const betmgmLink = `https://sports.betmgm.com/en/sports?options=${options}`;
+
           const slipId = createSlipId();
 
           publicSlipStore[slipId] = {
             legs: enrichedLegs,
-            betmgmLink: "https://sports.betmgm.com/",
-            fanduelCopy: enrichedLegs
-              .map((l, i) => `${i + 1}. ${l.team || "Unknown team"}`)
-              .join("\n"),
-            draftkingsCopy: enrichedLegs
-              .map((l, i) => `${i + 1}. ${l.team || "Unknown team"}`)
-              .join("\n")
+            betmgmLink,
+            fanduelCopy: enrichedLegs.map((l, i) => `${i + 1}. ${l.team}`).join("\n"),
+            draftkingsCopy: enrichedLegs.map((l, i) => `${i + 1}. ${l.team}`).join("\n")
           };
 
           await sendMessage(
             sender,
             `Slip ready ✅\n\nhttps://sharp-network-webhook.onrender.com/s/${slipId}`
           );
+
         } else {
           await sendMessage(sender, "Send a betting slip image 📸");
         }
