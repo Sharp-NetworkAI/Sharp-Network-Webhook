@@ -68,12 +68,6 @@ function getBetMGMMoneylineOptionMap() {
   };
 }
 
-function formatTeamForMGM(team) {
-  return `MGM_OPTION_${team
-    .toUpperCase()
-    .replace(/[^A-Z]/g, "_")}_ML`;
-}
-
 /* =========================
    SEND MESSAGE
 ========================= */
@@ -210,9 +204,7 @@ function findMatchingEvent(teamName, events) {
 /* =========================
    ROUTES
 ========================= */
-app.get("/", (_req, res) => {
-  res.send("running");
-});
+app.get("/", (_req, res) => res.send("running"));
 
 app.get("/webhook", (req, res) => {
   if (req.query["hub.verify_token"] === VERIFY_TOKEN) {
@@ -227,18 +219,9 @@ app.get("/s/:slipId", (req, res) => {
 
 app.get("/api/slip/:slipId", (req, res) => {
   const slip = publicSlipStore[req.params.slipId];
+  if (!slip) return res.status(404).json({ success: false });
 
-  if (!slip) {
-    return res.status(404).json({
-      success: false,
-      error: "Slip not found"
-    });
-  }
-
-  return res.json({
-    success: true,
-    slip
-  });
+  res.json({ success: true, slip });
 });
 
 /* =========================
@@ -256,12 +239,9 @@ app.post("/webhook", async (req, res) => {
         const sender = event.sender.id;
 
         let imageUrl = null;
-
         if (event.message.attachments) {
-          const img = event.message.attachments.find((a) => a.type === "image");
-          if (img?.payload?.url) {
-            imageUrl = img.payload.url;
-          }
+          const img = event.message.attachments.find(a => a.type === "image");
+          if (img?.payload?.url) imageUrl = img.payload.url;
         }
 
         if (imageUrl) {
@@ -269,10 +249,7 @@ app.post("/webhook", async (req, res) => {
           const resolved = Array.isArray(parsed.legs) ? parsed.legs : [];
 
           if (!resolved.length) {
-            await sendMessage(
-              sender,
-              "I couldn’t read that slip clearly. Send a clearer screenshot that shows the full bet slip."
-            );
+            await sendMessage(sender, "Couldn’t read slip clearly.");
             continue;
           }
 
@@ -280,13 +257,7 @@ app.post("/webhook", async (req, res) => {
 
           const enrichedLegs = resolved.map((leg) => {
             const match = findMatchingEvent(leg.team, events);
-
-            if (!match) {
-              return {
-                ...leg,
-                eventId: "NOT_FOUND"
-              };
-            }
+            if (!match) return { ...leg, eventId: "NOT_FOUND" };
 
             return {
               ...leg,
@@ -296,9 +267,16 @@ app.post("/webhook", async (req, res) => {
             };
           });
 
+          const optionMap = getBetMGMMoneylineOptionMap();
+
           const options = enrichedLegs
-            .filter((l) => l.eventId !== "NOT_FOUND")
-            .map((l) => `${l.eventId}-MGM_MARKET_MONEYLINE-${formatTeamForMGM(l.team)}`)
+            .filter(l => l.eventId !== "NOT_FOUND")
+            .map(l => {
+              const optionId = optionMap[clean(l.team).toLowerCase()];
+              if (!optionId) return null;
+              return `${l.eventId}-MGM_MARKET_MONEYLINE-${optionId}`;
+            })
+            .filter(Boolean)
             .join("%2C");
 
           const betmgmLink = `https://sports.betmgm.com/en/sports?options=${options}`;
@@ -307,9 +285,7 @@ app.post("/webhook", async (req, res) => {
 
           publicSlipStore[slipId] = {
             legs: enrichedLegs,
-            betmgmLink,
-            fanduelCopy: enrichedLegs.map((l, i) => `${i + 1}. ${l.team}`).join("\n"),
-            draftkingsCopy: enrichedLegs.map((l, i) => `${i + 1}. ${l.team}`).join("\n")
+            betmgmLink
           };
 
           await sendMessage(
