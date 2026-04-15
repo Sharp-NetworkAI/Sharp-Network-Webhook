@@ -5,12 +5,12 @@
  *
  * ENV VARS (set in Render dashboard):
  *   PAGE_ACCESS_TOKEN   Long-lived Facebook Page access token
- *   PAGE_ID             Numeric Facebook Page ID
+ *   PAGE_ID             Numeric Facebook Page ID  (optional — bot uses me/messages)
  *   VERIFY_TOKEN        Webhook verify token (any string you choose)
- *   APP_SECRET          Facebook App Secret (for webhook signature verification)
+ *   APP_SECRET          Facebook App Secret — leave EMPTY to skip sig check
  *   OPENAI_API_KEY      GPT-4o vision parsing
- *   ODDS_API_KEY        The Odds API key (optional — enables real event deep links)
- *   BASE_URL            Your full public URL, e.g. https://sharp-network-webhook.onrender.com
+ *   ODDS_API_KEY        The Odds API key (optional)
+ *   BASE_URL            Your full public URL e.g. https://sharp-network-webhook.onrender.com
  *   TRIGGER_KEYWORD     Keyword in comments that activates the bot (default: slipcopy)
  *   PORT                Server port (default: 3000)
  */
@@ -24,7 +24,7 @@ const app = express();
 
 // ─── Body parsing ────────────────────────────────────────────────────────────
 // Use express.json's built-in verify callback to capture the raw body buffer.
-// This is the correct way — a separate stream listener breaks req.body parsing.
+// A separate stream listener would consume the body before express.json sees it.
 app.use(express.json({
   verify: (req, _res, buf) => {
     req.rawBody = buf;
@@ -47,6 +47,17 @@ const TRIGGER_KW   = (process.env.TRIGGER_KEYWORD  || "slipcopy").toLowerCase();
 const GRAPH        = "https://graph.facebook.com/v20.0";
 const SLIP_TTL_MS  = 72 * 60 * 60 * 1000; // 72 hours
 
+// ─── Startup diagnostics ─────────────────────────────────────────────────────
+console.log("=== Sharp Network AI — startup config ===");
+console.log("  PAGE_TOKEN  :", PAGE_TOKEN  ? `set (${PAGE_TOKEN.length} chars)` : "❌ MISSING");
+console.log("  VERIFY_TOKEN:", VERIFY_TOKEN ? "set" : "❌ MISSING");
+console.log("  APP_SECRET  :", APP_SECRET  ? "set (sig check ON)" : "not set (sig check OFF — OK for dev)");
+console.log("  PAGE_ID     :", PAGE_ID     ? PAGE_ID : "not set (using me/messages — fine)");
+console.log("  OPENAI_KEY  :", OPENAI_KEY  ? "set" : "❌ MISSING — bot will use demo legs");
+console.log("  BASE_URL    :", BASE_URL    ? BASE_URL : "❌ MISSING — slip URLs will be broken");
+console.log("  TRIGGER_KW  :", TRIGGER_KW);
+console.log("=========================================");
+
 /* =============================================================================
    PERSISTENT FILE-BASED STORE
    Slips are written to slips.json on disk so they survive Render spin-downs,
@@ -60,7 +71,6 @@ function _loadFromDisk() {
       const raw  = fs.readFileSync(STORE_FILE, "utf8");
       const data = JSON.parse(raw);
       const now  = Date.now();
-      // Drop already-expired slips on startup
       for (const [id, slip] of Object.entries(data)) {
         if (slip.expiresAt && new Date(slip.expiresAt).getTime() < now) {
           delete data[id];
@@ -78,7 +88,6 @@ const _storeData = _loadFromDisk();
 let   _saveTimer = null;
 
 function _saveToDisk() {
-  // Debounced — write at most once per second
   if (_saveTimer) clearTimeout(_saveTimer);
   _saveTimer = setTimeout(() => {
     try {
@@ -111,7 +120,6 @@ const slipStore = {
   },
 
   mutate(id, fn) {
-    // Read → mutate → write back (for click counting etc.)
     const slip = this.get(id);
     if (!slip) return null;
     fn(slip);
@@ -147,7 +155,6 @@ const processedIds = new Set();
 function markProcessed(id) {
   if (processedIds.has(id)) return true;
   processedIds.add(id);
-  // Keep set bounded
   if (processedIds.size > 5000) {
     const iter = processedIds.values();
     for (let i = 0; i < 500; i++) processedIds.delete(iter.next().value);
@@ -176,16 +183,30 @@ function splitChunks(text, maxLen = 1900) {
    SIGNATURE VERIFICATION
 ============================================================================= */
 function verifySignature(req) {
-  if (!APP_SECRET) return true; // dev mode — skip
+  if (!APP_SECRET) {
+    console.log("[sig] APP_SECRET not set — skipping signature check");
+    return true;
+  }
   const sig = req.headers["x-hub-signature-256"];
-  if (!sig) return false;
+  if (!sig) {
+    console.warn("[sig] No x-hub-signature-256 header — rejecting");
+    return false;
+  }
+  const rawBody = req.rawBody;
+  if (!rawBody || rawBody.length === 0) {
+    console.warn("[sig] rawBody is empty — rejecting (body parsing issue?)");
+    return false;
+  }
   const expected = "sha256=" + crypto
     .createHmac("sha256", APP_SECRET)
-    .update(req.rawBody || "")
+    .update(rawBody)
     .digest("hex");
   try {
-    return crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected));
-  } catch {
+    const match = crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected));
+    if (!match) console.warn("[sig] Signature mismatch — rejecting");
+    return match;
+  } catch (e) {
+    console.warn("[sig] timingSafeEqual error:", e.message);
     return false;
   }
 }
@@ -330,16 +351,19 @@ Example output:
 ]`;
 
 async function parseSlipImage(imageUrl) {
+  console.log("[openai] parseSlipImage called — imageUrl:", imageUrl ? imageUrl.slice(0, 80) + "..." : "null");
+
   if (!OPENAI_KEY) {
-    // Demo mode — return mock legs so the UI is always testable
+    console.log("[openai] No API key — returning demo legs");
     return [
-      { team: "Kansas City Chiefs", market: "Moneyline",              selection: "Chiefs ML",    odds: "-160", sport: "NFL" },
-      { player: "Patrick Mahomes",  market: "Over 295.5 Pass. Yards", selection: "Over",         odds: "-115", sport: "NFL" },
-      { team: "Los Angeles Lakers", market: "Spread +4.5",            selection: "Lakers +4.5",  odds: "-110", sport: "NBA" },
+      { team: "Kansas City Chiefs", market: "Moneyline",              selection: "Chiefs ML",   odds: "-160", sport: "NFL" },
+      { player: "Patrick Mahomes",  market: "Over 295.5 Pass. Yards", selection: "Over",        odds: "-115", sport: "NFL" },
+      { team: "Los Angeles Lakers", market: "Spread +4.5",            selection: "Lakers +4.5", odds: "-110", sport: "NBA" },
     ];
   }
 
   try {
+    console.log("[openai] Calling gpt-4o vision...");
     const resp = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": `Bearer ${OPENAI_KEY}` },
@@ -353,11 +377,25 @@ async function parseSlipImage(imageUrl) {
         ],
       }),
     });
+
+    console.log("[openai] HTTP status:", resp.status);
+
     const data = await resp.json();
-    const raw  = data.choices?.[0]?.message?.content || "[]";
+    console.log("[openai] Response keys:", Object.keys(data));
+
+    if (data.error) {
+      console.error("[openai] API error:", JSON.stringify(data.error));
+      return [];
+    }
+
+    const raw     = data.choices?.[0]?.message?.content || "[]";
+    console.log("[openai] Raw content:", raw.slice(0, 200));
+
     const cleaned = raw.replace(/```json?\n?/g, "").replace(/```/g, "").trim();
-    const legs = JSON.parse(cleaned);
-    return Array.isArray(legs) ? legs.filter((l) => l.market && l.selection) : [];
+    const legs    = JSON.parse(cleaned);
+    const filtered = Array.isArray(legs) ? legs.filter((l) => l.market && l.selection) : [];
+    console.log("[openai] Parsed legs:", filtered.length);
+    return filtered;
   } catch (e) {
     console.error("[openai] image parse error:", e.message);
     return [];
@@ -365,6 +403,7 @@ async function parseSlipImage(imageUrl) {
 }
 
 async function parseSlipText(text) {
+  console.log("[openai] parseSlipText called — text length:", text.length);
   if (!OPENAI_KEY || !text.trim()) return [];
   try {
     const resp = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -380,10 +419,10 @@ async function parseSlipText(text) {
         ],
       }),
     });
-    const data = await resp.json();
-    const raw  = data.choices?.[0]?.message?.content || "[]";
+    const data    = await resp.json();
+    const raw     = data.choices?.[0]?.message?.content || "[]";
     const cleaned = raw.replace(/```json?\n?/g, "").replace(/```/g, "").trim();
-    const legs = JSON.parse(cleaned);
+    const legs    = JSON.parse(cleaned);
     return Array.isArray(legs) ? legs.filter((l) => l.market && l.selection) : [];
   } catch (e) {
     console.error("[openai] text parse error:", e.message);
@@ -490,7 +529,6 @@ function buildDraftKingsLink(legs) {
 }
 
 function buildBetMGMLink(legs) {
-  // Try Odds API link first
   const links = legs.flatMap((l) => {
     if (!l.oddsEvent) return [];
     const book = l.oddsEvent.bookmakers?.find((b) => b.key === "betmgm");
@@ -498,7 +536,6 @@ function buildBetMGMLink(legs) {
   });
   if (links.length > 0) return links[0];
 
-  // Fallback: native tuple map (add matchups here as you collect them)
   const nativeMap = {
     "arizona diamondbacks @ baltimore orioles": {
       fixtureId: "e7bc40f9611b8baa6328e83959820910",
@@ -525,18 +562,139 @@ function buildBetMGMLink(legs) {
 }
 
 /* =============================================================================
+   MESSENGER SEND API
+   Uses "me/messages" — works without PAGE_ID env var.
+============================================================================= */
+async function sendMessage(psid, text) {
+  console.log(`[send] sendMessage → psid=${psid}, text="${String(text).slice(0, 60)}"`);
+  if (!PAGE_TOKEN) {
+    console.error("[send] PAGE_ACCESS_TOKEN is not set — cannot send message");
+    return;
+  }
+  const chunks = splitChunks(String(text || ""));
+  for (const chunk of chunks) {
+    try {
+      const resp = await fetch(`${GRAPH}/me/messages?access_token=${PAGE_TOKEN}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          recipient:      { id: psid },
+          message:        { text: chunk },
+          messaging_type: "RESPONSE",
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        console.error("[send] sendMessage failed:", resp.status, JSON.stringify(data));
+      } else {
+        console.log("[send] sendMessage OK — message_id:", data.message_id);
+      }
+    } catch (e) {
+      console.error("[send] sendMessage threw:", e.message);
+    }
+  }
+}
+
+async function sendSlipCard(psid, slipUrl, legCount) {
+  console.log(`[send] sendSlipCard → psid=${psid}, legs=${legCount}, url=${slipUrl}`);
+  if (!PAGE_TOKEN) {
+    console.error("[send] PAGE_ACCESS_TOKEN is not set — cannot send slip card");
+    return;
+  }
+  try {
+    const resp = await fetch(`${GRAPH}/me/messages?access_token=${PAGE_TOKEN}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        recipient:      { id: psid },
+        messaging_type: "RESPONSE",
+        message: {
+          attachment: {
+            type: "template",
+            payload: {
+              template_type: "button",
+              text: `🎯 Your ${legCount}-leg slip is ready! Choose your sportsbook and it's pre-loaded:`,
+              buttons: [{
+                type:                 "web_url",
+                url:                  slipUrl,
+                title:                "Copy My Slip →",
+                webview_height_ratio: "tall",
+                messenger_extensions: false,
+              }],
+            },
+          },
+        },
+      }),
+    });
+
+    const data = await resp.json();
+    if (!resp.ok) {
+      console.error("[send] sendSlipCard template failed:", resp.status, JSON.stringify(data));
+      // Fallback to plain text
+      console.log("[send] falling back to plain text message");
+      await sendMessage(
+        psid,
+        `🎯 Slip ready!\n\nChoose your sportsbook to copy all ${legCount} leg${legCount !== 1 ? "s" : ""}:\n${slipUrl}`
+      );
+    } else {
+      console.log("[send] sendSlipCard OK — message_id:", data.message_id);
+    }
+  } catch (e) {
+    console.error("[send] sendSlipCard threw:", e.message);
+    // Fallback to plain text
+    await sendMessage(
+      psid,
+      `🎯 Slip ready!\n\nChoose your sportsbook to copy all ${legCount} leg${legCount !== 1 ? "s" : ""}:\n${slipUrl}`
+    );
+  }
+}
+
+/* =============================================================================
+   GRAPH API — PAGE COMMENT REPLY
+============================================================================= */
+async function replyToComment(commentId, message) {
+  await fetch(`${GRAPH}/${commentId}/replies?access_token=${PAGE_TOKEN}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message }),
+  }).catch((e) => console.error("[comment reply] error:", e.message));
+}
+
+async function fetchPostImageUrl(postId) {
+  try {
+    const resp = await fetch(
+      `${GRAPH}/${postId}?fields=full_picture,attachments{media,subattachments}&access_token=${PAGE_TOKEN}`
+    );
+    const data = await resp.json();
+    if (data.full_picture) return data.full_picture;
+    const att = data.attachments?.data?.[0];
+    if (att?.media?.image?.src) return att.media.image.src;
+    const sub = att?.subattachments?.data?.[0];
+    if (sub?.media?.image?.src) return sub.media.image.src;
+  } catch {}
+  return null;
+}
+
+/* =============================================================================
    CORE SLIP PIPELINE
    parse → enrich with Odds API → build links → persist to disk
 ============================================================================= */
 async function processSlip({ imageUrl, text, platform, userId }) {
+  console.log(`[pipeline] processSlip start — platform=${platform}, imageUrl=${!!imageUrl}, text="${(text||"").slice(0,40)}"`);
+
   // 1. Parse with GPT-4o
   const legs = imageUrl
     ? await parseSlipImage(imageUrl)
     : await parseSlipText(text || "");
 
-  if (!legs || legs.length === 0) return null;
+  console.log(`[pipeline] legs parsed: ${legs ? legs.length : 0}`);
 
-  // 2. Group by sport and fetch events in parallel (minimises Odds API calls)
+  if (!legs || legs.length === 0) {
+    console.warn("[pipeline] No legs found — returning null");
+    return null;
+  }
+
+  // 2. Group by sport and fetch events in parallel
   const sportGroups = {};
   for (const leg of legs) {
     const sport = (leg.sport || "MLB").toUpperCase();
@@ -588,86 +746,8 @@ async function processSlip({ imageUrl, text, platform, userId }) {
   });
 
   const slipUrl = `${BASE_URL}/s/${slipId}`;
+  console.log(`[pipeline] slip created — id=${slipId}, url=${slipUrl}, legs=${storedLegs.length}`);
   return { slipId, slipUrl, legs: storedLegs, links };
-}
-
-/* =============================================================================
-   MESSENGER SEND API
-============================================================================= */
-async function sendMessage(psid, text) {
-  const chunks = splitChunks(String(text || ""));
-  for (const chunk of chunks) {
-    await fetch(`${GRAPH}/${PAGE_ID}/messages?access_token=${PAGE_TOKEN}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        recipient:      { id: psid },
-        message:        { text: chunk },
-        messaging_type: "RESPONSE",
-      }),
-    }).catch((e) => console.error("[send] error:", e.message));
-  }
-}
-
-async function sendSlipCard(psid, slipUrl, legCount) {
-  const resp = await fetch(`${GRAPH}/${PAGE_ID}/messages?access_token=${PAGE_TOKEN}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      recipient:      { id: psid },
-      messaging_type: "RESPONSE",
-      message: {
-        attachment: {
-          type: "template",
-          payload: {
-            template_type: "button",
-            text: `🎯 Your ${legCount}-leg slip is ready! Choose your sportsbook and it's pre-loaded:`,
-            buttons: [{
-              type:                 "web_url",
-              url:                  slipUrl,
-              title:                "Copy My Slip →",
-              webview_height_ratio: "tall",
-              messenger_extensions: false,
-            }],
-          },
-        },
-      },
-    }),
-  });
-
-  if (!resp.ok) {
-    // Fallback to plain text if button template fails (e.g. missing permissions)
-    await sendMessage(
-      psid,
-      `🎯 Slip ready!\n\nChoose your sportsbook to copy all ${legCount} leg${legCount !== 1 ? "s" : ""}:\n${slipUrl}`
-    );
-  }
-}
-
-/* =============================================================================
-   GRAPH API — PAGE COMMENT REPLY
-============================================================================= */
-async function replyToComment(commentId, message) {
-  await fetch(`${GRAPH}/${commentId}/replies?access_token=${PAGE_TOKEN}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message }),
-  }).catch((e) => console.error("[comment reply] error:", e.message));
-}
-
-async function fetchPostImageUrl(postId) {
-  try {
-    const resp = await fetch(
-      `${GRAPH}/${postId}?fields=full_picture,attachments{media,subattachments}&access_token=${PAGE_TOKEN}`
-    );
-    const data = await resp.json();
-    if (data.full_picture) return data.full_picture;
-    const att = data.attachments?.data?.[0];
-    if (att?.media?.image?.src) return att.media.image.src;
-    const sub = att?.subattachments?.data?.[0];
-    if (sub?.media?.image?.src) return sub.media.image.src;
-  } catch {}
-  return null;
 }
 
 /* =============================================================================
@@ -677,6 +757,7 @@ app.get("/", (_req, res) => res.send("Sharp Network AI — running ✅"));
 
 // Meta webhook verification handshake
 app.get("/webhook", (req, res) => {
+  console.log("[webhook] GET verify — token match:", req.query["hub.verify_token"] === VERIFY_TOKEN);
   if (req.query["hub.verify_token"] === VERIFY_TOKEN) {
     return res.send(req.query["hub.challenge"]);
   }
@@ -718,30 +799,46 @@ app.post("/webhook", async (req, res) => {
   // ACK immediately — Meta requires 200 within 20 seconds
   res.sendStatus(200);
 
+  console.log("[webhook] POST received — body object:", req.body?.object, "| rawBody length:", req.rawBody?.length ?? 0);
+
   if (!verifySignature(req)) {
-    console.warn("[webhook] invalid signature — ignoring");
+    console.warn("[webhook] Signature check failed — dropping event");
     return;
   }
 
   const body = req.body;
-  if (body.object !== "page") return;
+  if (body.object !== "page") {
+    console.log("[webhook] Not a page event (object=" + body.object + ") — ignoring");
+    return;
+  }
+
+  console.log("[webhook] Processing", (body.entry || []).length, "entries");
 
   for (const entry of (body.entry || [])) {
+    const messagingEvents = entry.messaging || [];
+    const changeEvents    = entry.changes   || [];
+    console.log(`[webhook] entry — ${messagingEvents.length} messaging events, ${changeEvents.length} changes`);
 
-    // ── MESSENGER DIRECT MESSAGES ───────────────────────────────────────────
-    for (const event of (entry.messaging || [])) {
+    // ── MESSENGER DIRECT MESSAGES ─────────────────────────────────────────────
+    for (const event of messagingEvents) {
+      console.log("[messenger] event type — is_echo:", !!event.message?.is_echo, "| has sender:", !!event.sender?.id);
+
       if (!event.message || event.message.is_echo) continue;
       if (!event.sender?.id) continue;
 
       const senderId = event.sender.id;
       const msgId    = event.message.mid;
-      if (markProcessed(msgId)) continue;
+
+      if (markProcessed(msgId)) {
+        console.log("[messenger] duplicate mid — skipping:", msgId);
+        continue;
+      }
 
       const text     = event.message.text || "";
       const imgAtt   = (event.message.attachments || []).find((a) => a.type === "image");
       const imageUrl = imgAtt?.payload?.url || null;
 
-      console.log(`[messenger] from ${senderId} — image: ${!!imageUrl}, text: "${text.slice(0, 60)}"`);
+      console.log(`[messenger] from=${senderId} | image=${!!imageUrl} | text="${text.slice(0, 60)}"`);
 
       if (!imageUrl && !text.trim()) {
         await sendMessage(senderId, "Hey! Send me a betting slip screenshot 📸 and Sharp Network AI will create a link to copy it into any sportsbook instantly.");
@@ -760,8 +857,8 @@ app.post("/webhook", async (req, res) => {
       await sendSlipCard(senderId, result.slipUrl, result.legs.length);
     }
 
-    // ── PAGE FEED — COMMENT TRIGGER ─────────────────────────────────────────
-    for (const change of (entry.changes || [])) {
+    // ── PAGE FEED — COMMENT TRIGGER ───────────────────────────────────────────
+    for (const change of changeEvents) {
       if (change.field !== "feed") continue;
       const v = change.value;
       if (v?.item !== "comment" || v?.verb !== "add") continue;
@@ -774,8 +871,8 @@ app.post("/webhook", async (req, res) => {
 
       if (!commentId || !postId)          continue;
       if (markProcessed(commentId))       continue;
-      if (senderId === PAGE_ID)           continue; // don't reply to own comments
-      if (!msgText.includes(TRIGGER_KW))  continue; // keyword gate
+      if (senderId === PAGE_ID)           continue;
+      if (!msgText.includes(TRIGGER_KW))  continue;
 
       console.log(`[feed] comment from @${senderName} on post ${postId}`);
 
