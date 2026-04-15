@@ -72,8 +72,35 @@ async function parseSlipFromImage(imageUrl) {
           content: [
             {
               type: "input_text",
-              text:
-                'Return ONLY valid JSON. Extract a betting slip into this exact format: {"legs":[{"team":"","odds":""}]}'
+              text: `
+You are extracting a sports betting slip.
+
+RULES:
+- Return ONLY valid JSON (no markdown, no explanation)
+- Format EXACTLY like this:
+{
+  "legs": [
+    { "team": "Team Name", "odds": "+123" }
+  ]
+}
+
+INSTRUCTIONS:
+- Extract EVERY bet shown in the image
+- Focus on MONEYLINE picks
+- The TEAM is the selected side (NOT both teams)
+- Ignore timestamps, league names, and headers
+- Odds are usually on the right (like -162, +140)
+
+IMPORTANT:
+- If you see "Seattle Mariners @ San Diego Padres"
+  and Mariners is selected → team = "Seattle Mariners"
+- Do NOT return both teams
+- Only return the selected team
+
+Be aggressive — even if formatting is messy, extract the teams.
+
+IMAGE:
+`
             },
             {
               type: "input_image",
