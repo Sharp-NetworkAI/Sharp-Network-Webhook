@@ -26,6 +26,7 @@ function norm(v) {
 
 function splitIntoChunks(text, maxLen = 1800) {
   if (text.length <= maxLen) return [text];
+
   const chunks = [];
   for (let i = 0; i < text.length; i += maxLen) {
     chunks.push(text.slice(i, i + maxLen));
@@ -89,33 +90,16 @@ function canonicalizeTeamName(team) {
 /* =========================
    BETMGM NATIVE MAP
 ========================= */
-/*
-  This is now the correct layer.
-
-  Shape:
-  {
-    "away team @ home team": {
-      fixtureId: "BETMGM_FIXTURE_ID",
-      marketId: "MGM_MARKET_MONEYLINE",
-      options: {
-        "selected team canonical name": "BETMGM_OPTION_ID"
-      }
-    }
-  }
-
-  Example:
-  "arizona diamondbacks @ baltimore orioles": {
-    fixtureId: "REAL_FIXTURE_ID_HERE",
-    marketId: "MGM_MARKET_MONEYLINE",
-    options: {
-      "baltimore orioles": "MGM_OPTION_ORIOLES_ML",
-      "arizona diamondbacks": "MGM_OPTION_DIAMONDBACKS_ML"
-    }
-  }
-*/
 function getBetMGMMoneylineNativeMap() {
   return {
-    // Fill this with REAL BetMGM-native fixture/option IDs.
+    "arizona diamondbacks @ baltimore orioles": {
+      fixtureId: "e7bc40f9611b8baa6328e83959820910",
+      marketId: "MGM_MARKET_MONEYLINE",
+      options: {
+        "baltimore orioles": "MGM_OPTION_ORIOLES_ML",
+        "arizona diamondbacks": "MGM_OPTION_DIAMONDBACKS_ML"
+      }
+    }
   };
 }
 
@@ -388,7 +372,7 @@ app.post("/webhook", async (req, res) => {
             return {
               ...leg,
               team: clean(leg.team),
-              eventId: match.id, // Odds API ID for display/matching only
+              eventId: match.id,
               home: match.home_team,
               away: match.away_team
             };
