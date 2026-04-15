@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>SlipCopy</title>
+  <title>Sharp Network AI</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
 
@@ -298,8 +298,20 @@
 
     <!-- Header -->
     <div class="header">
-      <div class="logo">🎯</div>
-      <div class="brand">Slip<span>Copy</span></div>
+      <!-- Sharp Network AI logo: neon green chart + arrow -->
+      <svg width="36" height="36" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0">
+        <rect width="36" height="36" rx="8" fill="#000"/>
+        <!-- Bar chart bars -->
+        <rect x="5"  y="22" width="3" height="7" rx="0.5" fill="none" stroke="#39ff6a" stroke-width="1.2"/>
+        <rect x="10" y="18" width="3" height="11" rx="0.5" fill="none" stroke="#39ff6a" stroke-width="1.2"/>
+        <rect x="15" y="14" width="3" height="15" rx="0.5" fill="none" stroke="#39ff6a" stroke-width="1.2"/>
+        <rect x="20" y="10" width="3" height="19" rx="0.5" fill="none" stroke="#39ff6a" stroke-width="1.2"/>
+        <!-- Trend arrow line -->
+        <polyline points="5,27 12,20 19,14 27,6" stroke="#39ff6a" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+        <!-- Arrow head -->
+        <polyline points="22,5 28,5 28,11" stroke="#39ff6a" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+      </svg>
+      <div class="brand"><span style="color:#00e5ff">Sharp</span><span style="color:#39ff6a">Network</span> <span style="color:#39ff6a; font-weight:400; font-size:14px">AI</span></div>
     </div>
 
     <!-- Loading state (shown until data loads) -->
@@ -368,15 +380,14 @@
 
       <!-- Bot promo -->
       <div class="card">
-        <div class="promo-title">Get slips like this instantly</div>
+        <div class="promo-title">Get slips like this from Sharp Network AI</div>
         <div class="promo-body">
-          Comment <strong style="color:#f0f0f5;">slipcopy</strong> on any Facebook or Instagram post
+          Comment <strong style="color:#f0f0f5;">slipcopy</strong> on any Facebook post
           with a betting slip screenshot and the bot will reply with a link like this one.
         </div>
         <div class="promo-tags">
           <span class="promo-tag">Facebook</span>
           <span class="promo-tag">Messenger</span>
-          <span class="promo-tag">Instagram</span>
         </div>
       </div>
 
@@ -488,19 +499,28 @@
         const div = document.createElement("div");
         div.className = "leg";
 
-        const teamOrPlayer = leg.player || leg.team || leg.selection || "—";
         const isPlayer = !!leg.player;
+
+        // Build game/matchup line — support both old schema (home/away) and new (game field)
         const gameText = leg.home && leg.away
           ? `${leg.away} @ ${leg.home}`
           : (leg.game || "");
+
+        // Primary label — player name, team, or selection (old schema compat)
+        const primaryLabel = leg.player || leg.team || "";
+
+        // Market line — use market field if present, otherwise derive from available data
+        const marketLine = leg.market || (leg.team ? "Moneyline" : "");
+
+        // Selection line — use selection field if present, otherwise use team as selection
+        const selectionLine = leg.selection || leg.participant || leg.rawSelection || "";
 
         div.innerHTML = `
           <div class="sport-icon">${sportEmoji(leg.sport)}</div>
           <div class="leg-body">
             ${gameText ? `<div class="leg-game">${esc(gameText)}</div>` : ""}
-            ${isPlayer ? `<div class="leg-player">${esc(leg.player)}</div>` : ""}
-            <div class="leg-market">${esc(leg.market || "—")}</div>
-            <div class="leg-selection">${esc(leg.selection || "")}</div>
+            ${primaryLabel ? `<div class="leg-market" style="font-weight:600">${esc(primaryLabel)}</div>` : ""}
+            ${marketLine && marketLine !== primaryLabel ? `<div class="leg-selection">${esc(marketLine)}</div>` : ""}
           </div>
           ${leg.odds ? `<div class="odds ${oddsClass(leg.odds)}">${esc(formatOdds(leg.odds))}</div>` : ""}
         `;
@@ -544,49 +564,30 @@
       document.getElementById("content").style.display = "block";
     }
 
-    async function handleBookClick(btn, bookKey, slipId, links) {
-      btn.classList.add("loading");
-      btn.innerHTML = `<div class="spinner"></div><span>${btn.querySelector("span:last-child").textContent}</span>`;
+    const FALLBACKS = {
+      fanduel:    "https://sportsbook.fanduel.com",
+      draftkings: "https://sportsbook.draftkings.com",
+      betmgm:     "https://sports.betmgm.com",
+      caesars:    "https://www.caesars.com/sportsbook-and-casino",
+      bet365:     "https://www.bet365.com",
+      espnbet:    "https://espnbet.com",
+      pointsbet:  "https://pointsbet.com",
+      barstool:   "https://www.barstoolsportsbook.com",
+    };
 
-      let deepLink = links[bookKey];
+    function handleBookClick(btn, bookKey, slipId, links) {
+      // IMPORTANT: window.open must be called synchronously inside the click handler
+      // or browsers will block it as a popup. We open immediately, then track in background.
+      const deepLink = (links && links[bookKey]) || FALLBACKS[bookKey] || "https://sportsbook.fanduel.com";
+      window.open(deepLink, "_blank", "noopener,noreferrer");
 
-      // Try the click-tracking endpoint to record the click and confirm the link
-      try {
-        const resp = await fetch(`/api/slip/${slipId}/click/${bookKey}`, { method: "POST" });
-        if (resp.ok) {
-          const data = await resp.json();
-          if (data.link) deepLink = data.link;
-        }
-      } catch {}
+      // Visual feedback
+      const originalHTML = btn.innerHTML;
+      btn.style.opacity = "0.7";
+      setTimeout(() => { btn.style.opacity = "1"; }, 300);
 
-      btn.classList.remove("loading");
-      btn.innerHTML = btn.innerHTML.replace(/<div class="spinner"><\/div>/, "");
-
-      const fallbacks = {
-        fanduel:    "https://sportsbook.fanduel.com",
-        draftkings: "https://sportsbook.draftkings.com",
-        betmgm:     "https://sports.betmgm.com",
-        caesars:    "https://www.caesars.com/sportsbook-and-casino",
-        bet365:     "https://www.bet365.com",
-        espnbet:    "https://espnbet.com",
-        pointsbet:  "https://pointsbet.com",
-        barstool:   "https://www.barstoolsportsbook.com",
-      };
-
-      window.open(deepLink || fallbacks[bookKey] || "https://sportsbook.fanduel.com", "_blank", "noopener,noreferrer");
-
-      // Restore button label
-      const book = [
-        { key: "fanduel", label: "FanDuel", icon: "🔵" },
-        { key: "draftkings", label: "DraftKings", icon: "🟢" },
-        { key: "betmgm", label: "BetMGM", icon: "🟡" },
-        { key: "caesars", label: "Caesars", icon: "🔴" },
-        { key: "bet365", label: "bet365", icon: "🟩" },
-        { key: "espnbet", label: "ESPN BET", icon: "📺" },
-        { key: "pointsbet", label: "PointsBet", icon: "🟠" },
-        { key: "barstool", label: "Barstool", icon: "⚫" },
-      ].find(b => b.key === bookKey);
-      if (book) btn.innerHTML = `<span>${book.icon}</span><span>${book.label}</span>`;
+      // Fire-and-forget click tracking (non-blocking, won't affect navigation)
+      fetch(`/api/slip/${slipId}/click/${bookKey}`, { method: "POST" }).catch(() => {});
     }
 
     function showError(msg) {
