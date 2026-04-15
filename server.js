@@ -33,6 +33,41 @@ function createSlipId() {
   return Math.random().toString(36).slice(2, 10);
 }
 
+function getBetMGMMoneylineOptionMap() {
+  return {
+    "baltimore orioles": "MGM_OPTION_ORIOLES_ML",
+    "st. louis cardinals": "MGM_OPTION_CARDINALS_ML",
+    "boston red sox": "MGM_OPTION_RED_SOX_ML",
+    "detroit tigers": "MGM_OPTION_TIGERS_ML",
+    "philadelphia phillies": "MGM_OPTION_PHILLIES_ML",
+    "atlanta braves": "MGM_OPTION_BRAVES_ML",
+    "toronto blue jays": "MGM_OPTION_BLUE_JAYS_ML",
+    "chicago white sox": "MGM_OPTION_WHITE_SOX_ML",
+    "san diego padres": "MGM_OPTION_PADRES_ML",
+    "athletics": "MGM_OPTION_ATHLETICS_ML",
+    "los angeles dodgers": "MGM_OPTION_DODGERS_ML",
+    "seattle mariners": "MGM_OPTION_MARINERS_ML",
+    "chicago cubs": "MGM_OPTION_CUBS_ML",
+    "pittsburgh pirates": "MGM_OPTION_PIRATES_ML",
+    "new york yankees": "MGM_OPTION_YANKEES_ML",
+    "minnesota twins": "MGM_OPTION_TWINS_ML",
+    "kansas city royals": "MGM_OPTION_ROYALS_ML",
+    "cleveland guardians": "MGM_OPTION_GUARDIANS_ML",
+    "miami marlins": "MGM_OPTION_MARLINS_ML",
+    "arizona diamondbacks": "MGM_OPTION_DIAMONDBACKS_ML",
+    "tampa bay rays": "MGM_OPTION_RAYS_ML",
+    "houston astros": "MGM_OPTION_ASTROS_ML",
+    "new york mets": "MGM_OPTION_METS_ML",
+    "milwaukee brewers": "MGM_OPTION_BREWERS_ML",
+    "texas rangers": "MGM_OPTION_RANGERS_ML",
+    "los angeles angels": "MGM_OPTION_ANGELS_ML",
+    "san francisco giants": "MGM_OPTION_GIANTS_ML",
+    "washington nationals": "MGM_OPTION_NATIONALS_ML",
+    "cincinnati reds": "MGM_OPTION_REDS_ML",
+    "colorado rockies": "MGM_OPTION_ROCKIES_ML"
+  };
+}
+
 function formatTeamForMGM(team) {
   return `MGM_OPTION_${team
     .toUpperCase()
@@ -223,7 +258,7 @@ app.post("/webhook", async (req, res) => {
         let imageUrl = null;
 
         if (event.message.attachments) {
-          const img = event.message.attachments.find(a => a.type === "image");
+          const img = event.message.attachments.find((a) => a.type === "image");
           if (img?.payload?.url) {
             imageUrl = img.payload.url;
           }
@@ -261,10 +296,9 @@ app.post("/webhook", async (req, res) => {
             };
           });
 
-          // 🔥 NEW: Build BetMGM link
           const options = enrichedLegs
-            .filter(l => l.eventId !== "NOT_FOUND")
-            .map(l => `${l.eventId}-MGM_MARKET_MONEYLINE-${formatTeamForMGM(l.team)}`)
+            .filter((l) => l.eventId !== "NOT_FOUND")
+            .map((l) => `${l.eventId}-MGM_MARKET_MONEYLINE-${formatTeamForMGM(l.team)}`)
             .join("%2C");
 
           const betmgmLink = `https://sports.betmgm.com/en/sports?options=${options}`;
