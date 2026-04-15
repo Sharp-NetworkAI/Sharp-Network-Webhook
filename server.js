@@ -182,10 +182,7 @@ app.post("/webhook", async (req, res) => {
 
     for (const entry of entries) {
       for (const event of entry.messaging || []) {
-
-        // 🔥 FIX: STOP SPAM LOOP
         if (!event.message || event.message.is_echo) continue;
-
         if (!event.sender?.id) continue;
 
         const sender = event.sender.id;
@@ -193,7 +190,7 @@ app.post("/webhook", async (req, res) => {
         let imageUrl = null;
 
         if (event.message.attachments) {
-          const img = event.message.attachments.find(a => a.type === "image");
+          const img = event.message.attachments.find((a) => a.type === "image");
           if (img?.payload?.url) {
             imageUrl = img.payload.url;
           }
@@ -202,6 +199,14 @@ app.post("/webhook", async (req, res) => {
         if (imageUrl) {
           const parsed = await parseSlipFromImage(imageUrl);
           const resolved = Array.isArray(parsed.legs) ? parsed.legs : [];
+
+          if (!resolved.length) {
+            await sendMessage(
+              sender,
+              "I couldn’t read that slip clearly. Send a clearer screenshot that shows the full bet slip."
+            );
+            continue;
+          }
 
           const events = await fetchMLBEvents();
 
@@ -228,15 +233,18 @@ app.post("/webhook", async (req, res) => {
           publicSlipStore[slipId] = {
             legs: enrichedLegs,
             betmgmLink: "https://sports.betmgm.com/",
-            fanduelCopy: enrichedLegs.map((l, i) => `${i + 1}. ${l.team}`).join("\n"),
-            draftkingsCopy: enrichedLegs.map((l, i) => `${i + 1}. ${l.team}`).join("\n")
+            fanduelCopy: enrichedLegs
+              .map((l, i) => `${i + 1}. ${l.team || "Unknown team"}`)
+              .join("\n"),
+            draftkingsCopy: enrichedLegs
+              .map((l, i) => `${i + 1}. ${l.team || "Unknown team"}`)
+              .join("\n")
           };
 
           await sendMessage(
             sender,
             `Slip ready ✅\n\nhttps://sharp-network-webhook.onrender.com/s/${slipId}`
           );
-
         } else {
           await sendMessage(sender, "Send a betting slip image 📸");
         }
