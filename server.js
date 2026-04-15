@@ -22,17 +22,14 @@ const fs      = require("fs");
 
 const app = express();
 
-// ─── Raw body capture (must come BEFORE express.json) ────────────────────────
-// Needed for Meta webhook signature verification
-app.use((req, _res, next) => {
-  const chunks = [];
-  req.on("data", (chunk) => chunks.push(chunk));
-  req.on("end", () => {
-    req.rawBody = Buffer.concat(chunks);
-    next();
-  });
-});
-app.use(express.json());
+// ─── Body parsing ────────────────────────────────────────────────────────────
+// Use express.json's built-in verify callback to capture the raw body buffer.
+// This is the correct way — a separate stream listener breaks req.body parsing.
+app.use(express.json({
+  verify: (req, _res, buf) => {
+    req.rawBody = buf;
+  }
+}));
 app.use(express.static(path.join(__dirname, "public")));
 
 /* =============================================================================
