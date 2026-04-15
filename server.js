@@ -20,6 +20,10 @@ function clean(v) {
   return String(v || "").replace(/\s+/g, " ").trim();
 }
 
+function norm(v) {
+  return clean(v).toLowerCase();
+}
+
 function splitIntoChunks(text, maxLen = 1800) {
   if (text.length <= maxLen) return [text];
   const chunks = [];
@@ -33,38 +37,135 @@ function createSlipId() {
   return Math.random().toString(36).slice(2, 10);
 }
 
-function getBetMGMMoneylineOptionMap() {
+function matchupKey(away, home) {
+  return `${norm(away)} @ ${norm(home)}`;
+}
+
+function canonicalizeTeamName(team) {
+  const t = norm(team);
+
+  const aliases = {
+    "arizona diamondbacks": ["arizona diamondbacks", "diamondbacks", "dbacks"],
+    "atlanta braves": ["atlanta braves", "braves"],
+    "athletics": ["athletics", "oakland athletics", "a's", "as"],
+    "baltimore orioles": ["baltimore orioles", "orioles"],
+    "boston red sox": ["boston red sox", "red sox"],
+    "chicago cubs": ["chicago cubs", "cubs"],
+    "chicago white sox": ["chicago white sox", "white sox"],
+    "cincinnati reds": ["cincinnati reds", "reds"],
+    "cleveland guardians": ["cleveland guardians", "guardians"],
+    "colorado rockies": ["colorado rockies", "rockies"],
+    "detroit tigers": ["detroit tigers", "tigers"],
+    "houston astros": ["houston astros", "astros"],
+    "kansas city royals": ["kansas city royals", "royals"],
+    "los angeles angels": ["los angeles angels", "angels"],
+    "los angeles dodgers": ["los angeles dodgers", "dodgers"],
+    "miami marlins": ["miami marlins", "marlins"],
+    "milwaukee brewers": ["milwaukee brewers", "brewers"],
+    "minnesota twins": ["minnesota twins", "twins"],
+    "new york mets": ["new york mets", "mets"],
+    "new york yankees": ["new york yankees", "yankees"],
+    "philadelphia phillies": ["philadelphia phillies", "phillies"],
+    "pittsburgh pirates": ["pittsburgh pirates", "pirates"],
+    "san diego padres": ["san diego padres", "padres"],
+    "san francisco giants": ["san francisco giants", "giants"],
+    "seattle mariners": ["seattle mariners", "mariners"],
+    "st. louis cardinals": ["st. louis cardinals", "st louis cardinals", "cardinals"],
+    "tampa bay rays": ["tampa bay rays", "rays"],
+    "texas rangers": ["texas rangers", "rangers"],
+    "toronto blue jays": ["toronto blue jays", "blue jays", "jays"],
+    "washington nationals": ["washington nationals", "nationals", "nats"]
+  };
+
+  for (const [canonical, names] of Object.entries(aliases)) {
+    if (names.some((name) => t === norm(name) || t.includes(norm(name)) || norm(name).includes(t))) {
+      return canonical;
+    }
+  }
+
+  return t;
+}
+
+/* =========================
+   BETMGM NATIVE MAP
+========================= */
+/*
+  This is now the correct layer.
+
+  Shape:
+  {
+    "away team @ home team": {
+      fixtureId: "BETMGM_FIXTURE_ID",
+      marketId: "MGM_MARKET_MONEYLINE",
+      options: {
+        "selected team canonical name": "BETMGM_OPTION_ID"
+      }
+    }
+  }
+
+  Example:
+  "arizona diamondbacks @ baltimore orioles": {
+    fixtureId: "REAL_FIXTURE_ID_HERE",
+    marketId: "MGM_MARKET_MONEYLINE",
+    options: {
+      "baltimore orioles": "MGM_OPTION_ORIOLES_ML",
+      "arizona diamondbacks": "MGM_OPTION_DIAMONDBACKS_ML"
+    }
+  }
+*/
+function getBetMGMMoneylineNativeMap() {
   return {
-    "baltimore orioles": "MGM_OPTION_ORIOLES_ML",
-    "st. louis cardinals": "MGM_OPTION_CARDINALS_ML",
-    "boston red sox": "MGM_OPTION_RED_SOX_ML",
-    "detroit tigers": "MGM_OPTION_TIGERS_ML",
-    "philadelphia phillies": "MGM_OPTION_PHILLIES_ML",
-    "atlanta braves": "MGM_OPTION_BRAVES_ML",
-    "toronto blue jays": "MGM_OPTION_BLUE_JAYS_ML",
-    "chicago white sox": "MGM_OPTION_WHITE_SOX_ML",
-    "san diego padres": "MGM_OPTION_PADRES_ML",
-    "athletics": "MGM_OPTION_ATHLETICS_ML",
-    "los angeles dodgers": "MGM_OPTION_DODGERS_ML",
-    "seattle mariners": "MGM_OPTION_MARINERS_ML",
-    "chicago cubs": "MGM_OPTION_CUBS_ML",
-    "pittsburgh pirates": "MGM_OPTION_PIRATES_ML",
-    "new york yankees": "MGM_OPTION_YANKEES_ML",
-    "minnesota twins": "MGM_OPTION_TWINS_ML",
-    "kansas city royals": "MGM_OPTION_ROYALS_ML",
-    "cleveland guardians": "MGM_OPTION_GUARDIANS_ML",
-    "miami marlins": "MGM_OPTION_MARLINS_ML",
-    "arizona diamondbacks": "MGM_OPTION_DIAMONDBACKS_ML",
-    "tampa bay rays": "MGM_OPTION_RAYS_ML",
-    "houston astros": "MGM_OPTION_ASTROS_ML",
-    "new york mets": "MGM_OPTION_METS_ML",
-    "milwaukee brewers": "MGM_OPTION_BREWERS_ML",
-    "texas rangers": "MGM_OPTION_RANGERS_ML",
-    "los angeles angels": "MGM_OPTION_ANGELS_ML",
-    "san francisco giants": "MGM_OPTION_GIANTS_ML",
-    "washington nationals": "MGM_OPTION_NATIONALS_ML",
-    "cincinnati reds": "MGM_OPTION_REDS_ML",
-    "colorado rockies": "MGM_OPTION_ROCKIES_ML"
+    // Fill this with REAL BetMGM-native fixture/option IDs.
+  };
+}
+
+function buildBetMGMLinkFromNativeMap(legs) {
+  const nativeMap = getBetMGMMoneylineNativeMap();
+  const tuples = [];
+  const unresolved = [];
+
+  for (const leg of legs) {
+    if (!leg.home || !leg.away) {
+      unresolved.push({
+        team: leg.team,
+        reason: "Missing matched home/away teams"
+      });
+      continue;
+    }
+
+    const key = matchupKey(leg.away, leg.home);
+    const matchup = nativeMap[key];
+
+    if (!matchup) {
+      unresolved.push({
+        team: leg.team,
+        reason: `No BetMGM native mapping for matchup: ${key}`
+      });
+      continue;
+    }
+
+    const selectedTeam = canonicalizeTeamName(leg.team);
+    const optionId = matchup.options?.[selectedTeam];
+
+    if (!optionId) {
+      unresolved.push({
+        team: leg.team,
+        reason: `No BetMGM optionId for selected team: ${selectedTeam}`
+      });
+      continue;
+    }
+
+    tuples.push(`${matchup.fixtureId}-${matchup.marketId}-${optionId}`);
+  }
+
+  const link = tuples.length
+    ? `https://sports.betmgm.com/en/sports?options=${encodeURIComponent(tuples.join(","))}`
+    : null;
+
+  return {
+    link,
+    resolvedCount: tuples.length,
+    unresolved
   };
 }
 
@@ -111,7 +212,9 @@ async function parseSlipFromImage(imageUrl) {
 You are extracting a sports betting slip.
 
 RULES:
-- Return ONLY valid JSON (no markdown, no explanation)
+- Return ONLY valid JSON
+- No markdown
+- No explanation
 - Format EXACTLY like this:
 {
   "legs": [
@@ -120,21 +223,19 @@ RULES:
 }
 
 INSTRUCTIONS:
-- Extract EVERY bet shown in the image
+- Extract EVERY selected bet shown in the image
 - Focus on MONEYLINE picks
-- The TEAM is the selected side (NOT both teams)
-- Ignore timestamps, league names, and headers
-- Odds are usually on the right (like -162, +140)
+- The TEAM is the selected side only
+- Ignore headers, dates, timestamps, league labels, and UI noise
+- Odds are usually on the right
 
 IMPORTANT:
-- If you see "Seattle Mariners @ San Diego Padres"
-  and Mariners is selected → team = "Seattle Mariners"
-- Do NOT return both teams
+- If you see "Seattle Mariners @ San Diego Padres" and Mariners is selected,
+  return "Seattle Mariners"
+- Never return both teams
 - Only return the selected team
 
-Be aggressive — even if formatting is messy, extract the teams.
-
-IMAGE:
+Be aggressive and extract the selected teams even if formatting is messy.
 `
             },
             {
@@ -182,13 +283,15 @@ async function fetchMLBEvents() {
 }
 
 function findMatchingEvent(teamName, events) {
-  const target = clean(teamName).toLowerCase();
+  const target = canonicalizeTeamName(teamName);
 
   for (const event of events) {
-    const home = clean(event.home_team).toLowerCase();
-    const away = clean(event.away_team).toLowerCase();
+    const home = canonicalizeTeamName(event.home_team);
+    const away = canonicalizeTeamName(event.away_team);
 
     if (
+      home === target ||
+      away === target ||
       home.includes(target) ||
       away.includes(target) ||
       target.includes(home) ||
@@ -204,7 +307,9 @@ function findMatchingEvent(teamName, events) {
 /* =========================
    ROUTES
 ========================= */
-app.get("/", (_req, res) => res.send("running"));
+app.get("/", (_req, res) => {
+  res.send("running");
+});
 
 app.get("/webhook", (req, res) => {
   if (req.query["hub.verify_token"] === VERIFY_TOKEN) {
@@ -219,9 +324,18 @@ app.get("/s/:slipId", (req, res) => {
 
 app.get("/api/slip/:slipId", (req, res) => {
   const slip = publicSlipStore[req.params.slipId];
-  if (!slip) return res.status(404).json({ success: false });
 
-  res.json({ success: true, slip });
+  if (!slip) {
+    return res.status(404).json({
+      success: false,
+      error: "Slip not found"
+    });
+  }
+
+  return res.json({
+    success: true,
+    slip
+  });
 });
 
 /* =========================
@@ -240,8 +354,10 @@ app.post("/webhook", async (req, res) => {
 
         let imageUrl = null;
         if (event.message.attachments) {
-          const img = event.message.attachments.find(a => a.type === "image");
-          if (img?.payload?.url) imageUrl = img.payload.url;
+          const img = event.message.attachments.find((a) => a.type === "image");
+          if (img?.payload?.url) {
+            imageUrl = img.payload.url;
+          }
         }
 
         if (imageUrl) {
@@ -249,7 +365,10 @@ app.post("/webhook", async (req, res) => {
           const resolved = Array.isArray(parsed.legs) ? parsed.legs : [];
 
           if (!resolved.length) {
-            await sendMessage(sender, "Couldn’t read slip clearly.");
+            await sendMessage(
+              sender,
+              "I couldn’t read that slip clearly. Send a clearer screenshot that shows the full bet slip."
+            );
             continue;
           }
 
@@ -257,42 +376,40 @@ app.post("/webhook", async (req, res) => {
 
           const enrichedLegs = resolved.map((leg) => {
             const match = findMatchingEvent(leg.team, events);
-            if (!match) return { ...leg, eventId: "NOT_FOUND" };
+
+            if (!match) {
+              return {
+                ...leg,
+                team: clean(leg.team),
+                eventId: "NOT_FOUND"
+              };
+            }
 
             return {
               ...leg,
-              eventId: match.id,
+              team: clean(leg.team),
+              eventId: match.id, // Odds API ID for display/matching only
               home: match.home_team,
               away: match.away_team
             };
           });
 
-          const optionMap = getBetMGMMoneylineOptionMap();
-
-          const options = enrichedLegs
-            .filter(l => l.eventId !== "NOT_FOUND")
-            .map(l => {
-              const optionId = optionMap[clean(l.team).toLowerCase()];
-              if (!optionId) return null;
-              return `${l.eventId}-MGM_MARKET_MONEYLINE-${optionId}`;
-            })
-            .filter(Boolean)
-            .join("%2C");
-
-          const betmgmLink = `https://sports.betmgm.com/en/sports?options=${options}`;
-
+          const betmgm = buildBetMGMLinkFromNativeMap(enrichedLegs);
           const slipId = createSlipId();
 
           publicSlipStore[slipId] = {
             legs: enrichedLegs,
-            betmgmLink
+            betmgmLink: betmgm.link,
+            betmgmResolvedCount: betmgm.resolvedCount,
+            betmgmUnresolved: betmgm.unresolved,
+            fanduelCopy: enrichedLegs.map((l, i) => `${i + 1}. ${l.team}`).join("\n"),
+            draftkingsCopy: enrichedLegs.map((l, i) => `${i + 1}. ${l.team}`).join("\n")
           };
 
           await sendMessage(
             sender,
             `Slip ready ✅\n\nhttps://sharp-network-webhook.onrender.com/s/${slipId}`
           );
-
         } else {
           await sendMessage(sender, "Send a betting slip image 📸");
         }
